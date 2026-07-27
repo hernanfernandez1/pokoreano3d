@@ -137,17 +137,28 @@ const World = (() => {
     for (let x=0;x<MW-1;x+=3) putTree(x,0);
     for (let y=3;y<52;y+=3){ putTree(0,y); putTree(MW-2,y); }
 
-    // BIOMA COSTA (sur): mar abierto + playa ancha
-    for (let y=62;y<MH;y++) for (let x=0;x<MW;x++){ ground[y][x]="water"; solid[y][x]=true; }
-    for (let y=54;y<62;y++) for (let x=2;x<MW-2;x++){
-      if (!solid[y][x] && ground[y][x]!=="water") ground[y][x]="sand";
+    // BIOMA COSTA (sur): mar abierto + playa ancha, con la orilla ondulada
+    // (una costa recta delataba la rejilla; así entra y sale como una bahía)
+    const coastAt = x => 62 + Math.round(1.8*Math.sin(x*0.21) + 1.2*Math.sin(x*0.55 + 1.7));
+    for (let x=0;x<MW;x++){
+      const cy = coastAt(x);
+      for (let y=cy;y<MH;y++){ ground[y][x]="water"; solid[y][x]=true; }
+      for (let y=cy-8;y<cy;y++){
+        if (y < 2 || y >= MH) continue;
+        if (!solid[y][x] && ground[y][x]!=="water") ground[y][x]="sand";
+      }
     }
 
     // río (x 48-50) que baja hasta el mar
     for (let y=2;y<62;y++) for (let x=48;x<51;x++){ ground[y][x]="water"; solid[y][x]=true; }
 
-    // lago de la pradera
-    for (let y=28;y<34;y++) for (let x=14;x<21;x++){ ground[y][x]="water"; solid[y][x]=true; }
+    // lago de la pradera (esquinas mordidas para que no parezca una piscina)
+    for (let y=28;y<34;y++) for (let x=14;x<21;x++){
+      const edgeX = (x===14 || x===20), edgeY = (y===28 || y===33);
+      if (edgeX && edgeY) continue;
+      ground[y][x]="water"; solid[y][x]=true;
+    }
+    [[15,28],[19,33],[14,31],[20,29]].forEach(([x,y]) => { ground[y][x]="grass"; solid[y][x]=false; });
 
     // caminos (blob autotile)
     const pathH = (y) => { for (let x=2;x<MW-2;x++){ if (!solid[y][x]) ground[y][x]="path"; if (!solid[y+1][x]) ground[y+1][x]="path"; } };
@@ -580,19 +591,52 @@ const World = (() => {
   }
   function enterNorebang(){ pushMap(); Sfx.play("door"); buildNorebang(); }
 
-  // ---------- Casa de Karol (집) ----------
+  /* ---------- Casa de Karol (집) ----------
+     El cuarto ya no es una sala procedural: es el modelo 3D del pack de
+     habitaciones isométricas (js/homeRoom.js). Por eso la rejilla se monta al
+     revés que en el resto de interiores — todo sólido de partida y solo se
+     abren las casillas que en el modelo son suelo libre. El mapa de casillas
+     sale de la vista cenital que genera tools/room_grid.mjs. */
+  const HOME_W = 7, HOME_H = 8;
+  const HOME_FREE = [[1,4],[1,5],[1,6],[2,4],[2,5],[2,6],[2,7],[3,7],[4,7]];
+  const HOME_EXIT = [3, 7];
+  const HOME_SAVE = [1, 6];
+  const HOME_CAT  = [1, 4];
+  const HOME_SPAWN = [2, 6];
+
   function buildHome(){
-    buildRoom(11, 8, {
+    MW = HOME_W; MH = HOME_H;
+    ground=[]; solid=[]; meta=[]; decor=[];
+    for (let y=0;y<MH;y++){
+      ground[y]=[]; solid[y]=[]; meta[y]=[]; decor[y]=[];
+      for (let x=0;x<MW;x++){
+        ground[y][x]="floorA"; solid[y][x]=true; meta[y][x]=null; decor[y][x]=null;
+      }
+    }
+    HOME_FREE.forEach(([x,y]) => { solid[y][x] = false; });
+
+    const cat = initNpc({
       key:"gato_casa", name:"고양이 (Gato)", dir:0, tint:"#e8a24a", hair:"black",
-      wander:true, action:null, actionLabel:"✕ cerrar",
+      creature:"pgato", wander:false, action:null, actionLabel:"✕ cerrar",
       lines:[
         { ko:"야옹~ 집이 최고예요.", rom:"yaong~ jibi choegoyeyo.", es:"Miau~ el hogar es lo mejor." },
-      ]
-    }, "casa", () => {
-      // punto de guardado + cama
-      meta[3][2] = { type:"save" };
-      ground[3][2] = "rug";
+      ],
+      x: HOME_CAT[0], y: HOME_CAT[1],
     });
+    npcsCur = [cat];
+    solid[cat.y][cat.x] = true;
+    meta[cat.y][cat.x] = { type:"npc", npc:cat };
+
+    meta[HOME_SAVE[1]][HOME_SAVE[0]] = { type:"save" };
+    meta[HOME_EXIT[1]][HOME_EXIT[0]] = { type:"exit" };
+    ground[HOME_EXIT[1]][HOME_EXIT[0]] = "exitMat";
+
+    player.x=player.tx=HOME_SPAWN[0]; player.y=player.ty=HOME_SPAWN[1];
+    player.px=player.x*TILE; player.py=player.y*TILE;
+    player.dir=2;
+    mode="casa";
+    petTeleport();
+    sceneDirty = true;
     Sfx.play("ok");
   }
   function enterHome(){ pushMap(); Sfx.play("door"); buildHome(); }
@@ -1176,12 +1220,16 @@ const World = (() => {
     const img = new Image();
     img.onload = () => {
       const FW = img.width/4, FH = img.height/4;
+      // Se reescala x3 con vecino más cercano antes de recortar el borde: el
+      // pixel-art se mantiene duro y la textura tiene texeles de sobra, así
+      // que en pantalla el personaje sale nítido en vez de emborronado.
+      const UP = 3;
       for (let f = 0; f < 4; f++){
-        const c = document.createElement("canvas"); c.width = FW; c.height = FH;
+        const c = document.createElement("canvas"); c.width = FW*UP; c.height = FH*UP;
         const x = c.getContext("2d");
         x.imageSmoothingEnabled = false;
-        x.drawImage(img, f*FW, 0, FW, FH, 0, 0, FW, FH); // fila 0 = de frente
-        karol.frames.push(Paper.outline(c, 7));
+        x.drawImage(img, f*FW, 0, FW, FH, 0, 0, FW*UP, FH*UP); // fila 0 = de frente
+        karol.frames.push(Paper.outline(c, 7*UP));
       }
       karol.ready = true;
       swapPlayerToKarol(); // por si la escena ya estaba construida
@@ -1190,7 +1238,7 @@ const World = (() => {
   })();
   function swapPlayerToKarol(){
     if (!playerVis || !karol.ready || playerVis.skin !== "clásico") return;
-    playerVis.karolTex = karol.frames.map(f => own(Paper.canvasTex(f)));
+    playerVis.karolTex = karol.frames.map(f => own(Paper.canvasTex(f, { sharp: true })));
     playerVis.texF = playerVis.texB = playerVis.karolTex[0];
     playerVis.mat.map = playerVis.karolTex[0];
     playerVis.mat.needsUpdate = true;
@@ -1218,20 +1266,214 @@ const World = (() => {
   let seaHouseVis = null; // casa en el mar (js/seaHouse.js)
   let waterMat = null, waterTexA = null, waterTexB = null, waterT = 0, waterPhase = false;
 
+  /* ==========================================================
+     BIBLIOTECA 3D — pack StylisedEnv
+     ENV_PROPS  (js/envProps.js)  piezas macizas con color por vértice:
+                troncos, copas de árbol, arbustos, rocas, riscos,
+                troncos caídos, losas y guijarros.
+     ENV_ASSETS (js/envAssets.js) follaje con textura recortada
+                (flores, helechos, matojos) y rocas sueltas.
+     Las geometrías se cachean fuera de la escena: sobreviven a los
+     rebuilds y nunca pasan por own()/disposeScene().
+     ========================================================== */
+  let propsRaw = null, assetsRaw = null;
+  let foliageTex = null, propMat = null, foliageMat = null, plainMat = null;
+  let envAssetsCount = 0, envPropsCount = 0, gardenCount = 0;
+  const geoP = {}, geoA = {};
+
+  function decodeParts(list){
+    return list.map(o => ({
+      pos: b64ToF32(o.pos),
+      nor: o.nor ? b64ToF32(o.nor) : null,
+      uv:  o.uv  ? b64ToF32(o.uv)  : null,
+      col: o.col ? b64ToF32(o.col) : null,
+      idx: o.idx ? b64ToU32(o.idx) : null,
+      size: o.size,
+    }));
+  }
+  function makeGeo(o){
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(o.pos, 3));
+    if (o.nor) g.setAttribute("normal", new THREE.BufferAttribute(o.nor, 3));
+    if (o.uv)  g.setAttribute("uv", new THREE.BufferAttribute(o.uv, 2));
+    if (o.col) g.setAttribute("color", new THREE.BufferAttribute(o.col, 3));
+    if (o.idx) g.setIndex(new THREE.BufferAttribute(o.idx, 1));
+    if (!o.nor) g.computeVertexNormals();
+    return g;
+  }
+  // geometría de un prop macizo (ENV_PROPS) por índice
+  function propGeo(i){
+    if (typeof ENV_PROPS === "undefined") return null;
+    if (!propsRaw) propsRaw = decodeParts(ENV_PROPS.objects);
+    return geoP[i] || (geoP[i] = makeGeo(propsRaw[i]));
+  }
+  function propSize(i){
+    if (typeof ENV_PROPS === "undefined") return null;
+    if (!propsRaw) propsRaw = decodeParts(ENV_PROPS.objects);
+    return propsRaw[i].size;
+  }
+  // geometría de un asset con textura (ENV_ASSETS) por índice
+  function assetGeo(i){
+    if (typeof ENV_ASSETS === "undefined") return null;
+    if (!assetsRaw) assetsRaw = decodeParts(ENV_ASSETS.objects);
+    return geoA[i] || (geoA[i] = makeGeo(assetsRaw[i]));
+  }
+  function assetSize(i){
+    if (typeof ENV_ASSETS === "undefined") return null;
+    if (!assetsRaw) assetsRaw = decodeParts(ENV_ASSETS.objects);
+    return assetsRaw[i].size;
+  }
+  // materiales compartidos (tampoco se destruyen entre escenas)
+  function propMaterial(){
+    return propMat || (propMat = new THREE.MeshLambertMaterial({ vertexColors: true }));
+  }
+  /* Las rocas de ENV_ASSETS no traen color por vértice (van con textura), así
+     que necesitan un material liso: con vertexColors el atributo ausente se
+     lee como negro. El tono real llega por instanceColor. */
+  function plainMaterial(){
+    return plainMat || (plainMat = new THREE.MeshLambertMaterial({ color: 0xffffff }));
+  }
+  function foliageMaterial(){
+    if (foliageMat) return foliageMat;
+    foliageTex = new THREE.TextureLoader().load(ENV_ASSETS.foliageTex);
+    foliageTex.colorSpace = THREE.SRGBColorSpace;
+    foliageTex.flipY = false;      // UVs con convención glTF/OBJ del pack
+    foliageTex.anisotropy = 4;
+    foliageMat = new THREE.MeshLambertMaterial({
+      map: foliageTex, alphaTest: 0.5, side: THREE.DoubleSide,
+    });
+    return foliageMat;
+  }
+
+  /* Acumulador de instancias: se le van pidiendo piezas y al hacer flush()
+     emite un InstancedMesh por geometría, así el mapa entero cuesta unas
+     pocas decenas de draw calls en vez de miles de meshes sueltos. */
+  function instancer(){
+    const bins = new Map();
+    const M = new THREE.Matrix4(), Q = new THREE.Quaternion();
+    const P = new THREE.Vector3(), S = new THREE.Vector3(), E = new THREE.Euler();
+    return {
+      // p = {x, y, z, s, sy, rot, tilt, color}
+      // La altura del terreno se suma aquí, en un único punto: así cualquier
+      // pieza sembrada se apoya sola en la loma que le toque.
+      add(key, geo, mat, p){
+        if (!geo) return;
+        p.y = (p.y || 0) + terrainY(p.x, p.z);
+        let bin = bins.get(key);
+        if (!bin) bins.set(key, bin = { geo, mat, items: [] });
+        bin.items.push(p);
+      },
+      flush(shadows){
+        envAssetsCount = bins.size;
+        bins.forEach(bin => {
+          const inst = new THREE.InstancedMesh(bin.geo, bin.mat, bin.items.length);
+          // instanceColor nace a cero (= negro): si alguna instancia del lote
+          // lleva tinte, hay que darle blanco explícito a todas las demás.
+          const anyTint = bin.items.some(p => p.color);
+          bin.items.forEach((p, i) => {
+            E.set(p.tilt || 0, p.rot || 0, p.roll || 0);
+            Q.setFromEuler(E);
+            const s = p.s === undefined ? 1 : p.s;
+            M.compose(P.set(p.x, p.y || 0, p.z), Q, S.set(s, p.sy === undefined ? s : p.sy, s));
+            inst.setMatrixAt(i, M);
+            if (anyTint) inst.setColorAt(i, TMPCOL.set(p.color || "#ffffff"));
+          });
+          inst.castShadow = shadows !== false;
+          inst.receiveShadow = true;
+          inst.instanceMatrix.needsUpdate = true;
+          if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
+          own(inst);
+          worldGroup.add(inst);
+          envPropsCount += bin.items.length;
+        });
+        bins.clear();
+      },
+    };
+  }
+  const TMPCOL = new THREE.Color();
+
+  /* Catálogo por familias (índices verificados en las hojas de contactos
+     test-shots/props2_sheet_*.png y test-shots/envassets_sheet.png). */
+  const P3 = {
+    TRUNK:    1,                                    // tronco grande curvo
+    CANOPY:   [19, 20, 22, 16, 17, 18, 21, 23],     // copas / bolas de hoja
+    BUSH:     [16, 17, 18, 21, 23, 24],             // arbustos redondos
+    BOULDER:  [5, 6, 7, 10, 11, 12, 28, 29, 30, 32],// rocas musgosas
+    CRAG:     [3, 4, 13, 15, 25],                   // riscos grises altos
+    DARKCRAG: [54, 55, 56, 57, 58, 59, 60, 61],     // riscos oscuros
+    LOG:      [0, 2, 8, 9, 14, 26, 27, 37],         // troncos y ramas caídas
+    SLAB:     [42, 43, 44, 45, 46, 47, 48, 49, 50, 51], // losas planas
+    PEBBLE:   [63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81],
+    DRIFT:    [38, 39, 52, 53, 88, 89, 90, 91, 92, 93, 96, 100, 101], // madera a la deriva
+  };
+  const A3 = {
+    GROUNDCOVER: [0, 1, 10, 12],   // motas de hoja y pétalos a ras de suelo
+    FLOWER:      [2, 3, 5, 7],     // flores con tallo (amarilla, tulipán, morada, rosa)
+    FERN:        [4, 8, 9, 11],    // helechos y matojos frondosos
+    ROCK_BIG:    [13, 18, 19, 20, 21],
+    ROCK_SMALL:  [14, 15, 16, 17],
+  };
+  // hsh() llega hasta 2^32-1, así que un >> con signo puede dar negativos:
+  // se normaliza el índice para no salirse nunca del catálogo.
+  const pickFrom = (arr, h) => arr[(((h | 0) % arr.length) + arr.length) % arr.length];
+
+  /* Escala nativa del pack: el diorama Garden mide 4.87 u de ancho y se
+     coloca como una isla de 9 tiles, así que 1 unidad del pack ≈ 1.85 tiles.
+     Usando ese factor los props conservan las proporciones del original. */
+  const ES = 1.85;
+
+  /* Racimo de copas de un árbol. dx/dz van en unidades de tronco (se
+     multiplican por su escala) y dy es la fracción de la altura del tronco
+     a la que se apoya la base de la copa. */
+  const CANOPY_LAYOUT = [
+    { dx:  0.00, dz:  0.00, dy: 0.74, s: 1.05 },
+    { dx: -0.36, dz:  0.12, dy: 0.55, s: 0.82 },
+    { dx:  0.34, dz: -0.14, dy: 0.58, s: 0.86 },
+    { dx:  0.10, dz:  0.36, dy: 0.49, s: 0.74 },
+    { dx: -0.13, dz: -0.34, dy: 0.52, s: 0.78 },
+  ];
+  // tintes casi blancos: multiplican el color de vértice del pack y dan
+  // variedad de verdes sin ensuciar el sombreado plano del original
+  const CANOPY_TINTS = ["#ffffff", "#eaffd0", "#d8f5c4", "#fbffe4", "#dff0e0"];
+
   // ---------- horneado del suelo ----------
   const PPS = 20;
   const GCOL = {
-    grass: ["#7ecb54","#77c34e","#84d35b","#79c950"],
-    grassDot: "#5ea843",
+    // el césped ya no alterna tonos por tile (eso creaba un ajedrezado muy
+    // visible): es un verde base sobre el que se pintan manchas suaves
+    grass: "#6fc255",
+    grassPatch: ["#84d365", "#62b44b", "#93dd74", "#57a944", "#a6e383", "#7ac95c"],
+    grassDot: "#57a03e",
     tall: "#4e9e52", tallDark:"#3b8242",
-    sand: "#f2d49b", sandDot:"#e8c88a",
-    path: "#dcae7e", pathDot:"#cf9f6e",
-    waterDeep: "#2f7fc4",
+    sand: "#f3ddaa", sandPatch: ["#f8e7bd", "#e9cd95", "#f2d9a2"], sandDot:"#e2c68d",
+    path: "#d9a870", pathPatch: ["#e2b57e", "#cb9a62", "#dcae78"], pathDot:"#c69158",
+    waterDeep: "#2a72bd", waterShallow: "#4dbcdd",
     floorA:"#e8d9b8", floorB:"#dfcaa4",
     caveA:"#6a6478", caveB:"#736c80", caveWall:"#453f55",
     wallIn:"#b8a888",
     dirt: "#b09468",
   };
+  // "#rrggbb" + alfa → rgba() para las manchas degradadas
+  function rgba(hex, a){
+    const n = parseInt(hex.slice(1), 16);
+    return "rgba(" + ((n>>16)&255) + "," + ((n>>8)&255) + "," + (n&255) + "," + a + ")";
+  }
+  /* Manchas orgánicas: degradados radiales sembrados con hsh(), así el suelo
+     parece pintado a mano en vez de un tablero de casillas. */
+  function paintPatches(x, w, h, cols, count, minR, maxR, alpha, seed){
+    for (let i=0; i<count; i++){
+      const a = hsh(i*7+seed, i*31+13), b = hsh(i*17+3, seed*5+i);
+      const px = a % w, py = (a>>>10) % h;
+      const r = minR + (b % Math.max(1, maxR-minR));
+      const col = cols[(b>>>9) % cols.length];
+      const grd = x.createRadialGradient(px, py, 0, px, py, r);
+      grd.addColorStop(0, rgba(col, alpha));
+      grd.addColorStop(0.6, rgba(col, alpha*0.55));
+      grd.addColorStop(1, rgba(col, 0));
+      x.fillStyle = grd;
+      x.fillRect(px-r, py-r, r*2, r*2);
+    }
+  }
   function hsh(x, y){ return ((x*73856093) ^ (y*19349663)) >>> 0; }
   const isWaterish = n => n === undefined || n === "water" || (typeof n === "string" && (n.indexOf("bri")===0 || n.indexOf("pier")===0));
   const isSandLike = n => n === undefined || n==="sand" || n==="bushSand" || n==="path" || isWaterish(n);
@@ -1239,7 +1481,7 @@ const World = (() => {
 
   function tileBaseColor(name, tx, ty){
     const h = hsh(tx, ty);
-    if (name === undefined) return GCOL.grass[0];
+    if (name === undefined) return GCOL.grass;
     if (name === "tallgrass") return GCOL.tall;
     if (name === "sand" || name === "bushSand" || name.indexOf("sand")===0) return GCOL.sand;
     if (name === "path" || name === "plank") return GCOL.path;
@@ -1253,23 +1495,59 @@ const World = (() => {
     if (name === "caveFloorA" || name === "caveFloorC") return GCOL.caveA;
     if (name === "caveFloorB" || name === "caveFloorD") return GCOL.caveB;
     if (name === "caveWallTop" || name === "caveWallFace" || name === "caveWallFace2" || name === "caveRock") return GCOL.caveWall;
-    return GCOL.grass[h % 4]; // grass, flower*, tuft, mush, rock, bush, chest, fence*
+    return GCOL.grass; // grass, flower*, tuft, mush, rock, bush, chest, fence*
   }
 
+  /* Profundidad del agua en tiles (distancia a la tierra más cercana).
+     Sirve para el degradado del mar y para la espuma de la orilla. */
+  let depthField = null;
+  function waterDepth(){
+    if (depthField) return depthField;
+    const d = new Int16Array(MW*MH).fill(-1);
+    const q = [];
+    for (let y=0; y<MH; y++) for (let x=0; x<MW; x++){
+      if (ground[y][x] !== "water"){ d[y*MW+x] = 0; q.push(y*MW+x); }
+    }
+    for (let qi=0; qi<q.length; qi++){
+      const i = q[qi], x = i % MW, y = (i/MW)|0, nd = d[i]+1;
+      [[1,0],[-1,0],[0,1],[0,-1]].forEach(([dx,dy]) => {
+        const nx = x+dx, ny = y+dy;
+        if (nx<0 || ny<0 || nx>=MW || ny>=MH) return;
+        const j = ny*MW+nx;
+        if (d[j] !== -1) return;
+        d[j] = nd; q.push(j);
+      });
+    }
+    return (depthField = d);
+  }
+
+  const GRASSY = ["grass","flower","flower2","flower3","tuft","mush","rock","bush","chest"];
   function bakeGroundCanvas(){
     const c = document.createElement("canvas");
     c.width = MW*PPS; c.height = MH*PPS;
     const x = c.getContext("2d");
-    // base
+    // 1) todo el lienzo de verde base y encima manchas suaves: el degradado
+    //    continuo se ve luego a través de la hierba y rompe la retícula
+    x.fillStyle = GCOL.grass;
+    x.fillRect(0, 0, c.width, c.height);
+    if (mode === "over" || mode === "pueblo"){
+      const n = Math.round(MW*MH/26);
+      paintPatches(x, c.width, c.height, GCOL.grassPatch, n, PPS*2, PPS*8, 0.5, 11);
+      paintPatches(x, c.width, c.height, GCOL.grassPatch, n>>1, PPS*6, PPS*16, 0.28, 77);
+    }
+    // 2) tiles que no son césped: se pintan encima y tapan las manchas
     for (let ty=0; ty<MH; ty++) for (let tx=0; tx<MW; tx++){
       const name = ground[ty][tx];
-      x.fillStyle = tileBaseColor(name, tx, ty);
-      x.fillRect(tx*PPS, ty*PPS, PPS, PPS);
+      const grassy = name === undefined || GRASSY.includes(name);
+      if (!grassy){
+        x.fillStyle = tileBaseColor(name, tx, ty);
+        x.fillRect(tx*PPS, ty*PPS, PPS, PPS);
+      }
       const h = hsh(tx, ty);
       // motitas de textura
-      if (["grass","flower","flower2","flower3","tuft","mush","rock","bush","chest"].includes(name)){
+      if (grassy){
         x.fillStyle = GCOL.grassDot;
-        x.globalAlpha = 0.5;
+        x.globalAlpha = 0.45;
         x.fillRect(tx*PPS + (h%13)+2, ty*PPS + ((h>>4)%13)+2, 2, 2);
         x.fillRect(tx*PPS + ((h>>8)%15)+1, ty*PPS + ((h>>12)%15)+1, 2, 2);
         x.globalAlpha = 1;
@@ -1329,45 +1607,240 @@ const World = (() => {
     };
     roundCorners("path", isPathLike);
     roundCorners("sand", isSandLike);
-    // espuma del agua
+    // 3) manchas de arena y de tierra batida, recortadas a sus propios tiles
+    const patchInside = (pred, cols, seed) => {
+      x.save();
+      x.beginPath();
+      let any = false;
+      for (let ty=0; ty<MH; ty++) for (let tx=0; tx<MW; tx++){
+        if (!pred(ground[ty][tx])) continue;
+        x.rect(tx*PPS-1, ty*PPS-1, PPS+2, PPS+2);
+        any = true;
+      }
+      if (any){ x.clip(); paintPatches(x, c.width, c.height, cols, Math.round(MW*MH/40), PPS*2, PPS*7, 0.5, seed); }
+      x.restore();
+    };
+    patchInside(n => n === "sand" || n === "bushSand", GCOL.sandPatch, 41);
+    patchInside(n => n === "path", GCOL.pathPatch, 91);
+    // 4) arena mojada: la franja de playa que toca el agua va más oscura
+    x.fillStyle = "rgba(150,120,80,.22)";
     for (let ty=0; ty<MH; ty++) for (let tx=0; tx<MW; tx++){
-      if (ground[ty][tx] !== "water") continue;
-      const edges = [
-        [!isWaterish(ground[ty-1]?.[tx]), tx*PPS, ty*PPS+2, PPS, 0],
-        [!isWaterish(ground[ty+1]?.[tx]), tx*PPS, ty*PPS+PPS-2, PPS, 0],
-        [!isWaterish(ground[ty]?.[tx-1]), tx*PPS+2, ty*PPS, 0, PPS],
-        [!isWaterish(ground[ty]?.[tx+1]), tx*PPS+PPS-2, ty*PPS, 0, PPS],
-      ];
-      x.strokeStyle = "rgba(255,255,255,.85)"; x.lineWidth = 3; x.lineCap = "round";
-      edges.forEach(([hit, ex, ey, dx, dy]) => {
-        if (!hit) return;
-        x.beginPath();
-        x.moveTo(ex, ey);
-        x.lineTo(ex+dx, ey+dy);
-        x.stroke();
-      });
+      const n = ground[ty][tx];
+      if (n !== "sand" && n !== "bushSand") continue;
+      const near = [[1,0],[-1,0],[0,1],[0,-1],[1,1],[-1,1],[1,-1],[-1,-1]]
+        .some(([dx,dy]) => ground[ty+dy] && ground[ty+dy][tx+dx] === "water");
+      if (near) x.fillRect(tx*PPS, ty*PPS, PPS, PPS);
     }
+    // 5) el mar, con exactamente la misma silueta que la lámina animada
+    let hasWater = false;
+    for (let ty=0; ty<MH && !hasWater; ty++) for (let tx=0; tx<MW; tx++) if (isWaterTile(tx, ty)){ hasWater = true; break; }
+    if (hasWater) x.drawImage(bakeSea(false, false), 0, 0);
     return c;
   }
 
-  function bakeWaterCanvas(phase){
+  /* ---------- mar ----------
+     El suelo horneado y la lámina de agua tienen que recortar la orilla
+     EXACTAMENTE igual; si no, asoma por debajo una silueta azul oscura. Por
+     eso ambas usan la misma máscara y el mismo degradado de profundidad. */
+  let seaMaskCanvas = null, seaColorCanvas = null;
+  const isWaterTile = (tx, ty) => ground[ty] !== undefined && ground[ty][tx] === "water";
+
+  /* Silueta del agua. Se dibuja a 4 px por tile y se amplía interpolando: el
+     reescalado redondea las esquinas y deja un borde degradado de un cuarto
+     de casilla, así la orilla no baja en escalones y el agua se funde con la
+     arena como una lengua de marea. El segundo pase reafirma el interior. */
+  const MASK_RES = 4;
+  function seaMask(){
+    if (seaMaskCanvas) return seaMaskCanvas;
+    const small = document.createElement("canvas");
+    small.width = MW*MASK_RES; small.height = MH*MASK_RES;
+    const sx = small.getContext("2d");
+    sx.fillStyle = "#fff";
+    for (let ty=0; ty<MH; ty++) for (let tx=0; tx<MW; tx++){
+      if (isWaterTile(tx, ty)) sx.fillRect(tx*MASK_RES, ty*MASK_RES, MASK_RES, MASK_RES);
+    }
     const c = document.createElement("canvas");
     c.width = MW*PPS; c.height = MH*PPS;
     const x = c.getContext("2d");
+    x.imageSmoothingEnabled = true;
+    x.imageSmoothingQuality = "high";
+    x.drawImage(small, 0, 0, c.width, c.height);
+    x.drawImage(small, 0, 0, c.width, c.height);
+    return (seaMaskCanvas = c);
+  }
+
+  // degradado de profundidad (turquesa de orilla → azul hondo) con la espuma
+  // de la rompiente horneada; se pinta a 1 px por tile y se reescala
+  function seaColor(){
+    if (seaColorCanvas) return seaColorCanvas;
+    const depth = waterDepth();
+    const low = document.createElement("canvas");
+    low.width = MW; low.height = MH;
+    const lx = low.getContext("2d");
+    const shallow = new THREE.Color(GCOL.waterShallow), deep = new THREE.Color(GCOL.waterDeep);
+    const foamCol = new THREE.Color("#ffffff"), col = new THREE.Color();
+    // la espuma solo rompe contra la arena: en las orillas de hierba (lago,
+    // río) un borde blanco parecía niebla en vez de agua
+    const beachy = (tx, ty) => [[1,0],[-1,0],[0,1],[0,-1],[1,1],[-1,1],[1,-1],[-1,-1]]
+      .some(([dx,dy]) => { const g = ground[ty+dy] && ground[ty+dy][tx+dx]; return g === "sand" || g === "bushSand"; });
     for (let ty=0; ty<MH; ty++) for (let tx=0; tx<MW; tx++){
-      if (ground[ty][tx] !== "water") continue;
-      const h = hsh(tx, ty);
-      x.fillStyle = (h % 3 === 0) ? "#4aa8de" : "#4db2e8";
-      x.fillRect(tx*PPS, ty*PPS, PPS, PPS);
-      // ondas (dos arcos por tile, desplazados según la fase)
-      x.strokeStyle = "rgba(220,244,255,.8)"; x.lineWidth = 2; x.lineCap = "round";
-      const off = phase ? 5 : 0;
-      const ax = tx*PPS + ((h + off*3) % 10);
-      const ay = ty*PPS + 5 + ((h>>3) % 8) + (phase ? 2 : 0);
-      x.beginPath(); x.arc(ax+5, ay, 4, Math.PI*1.1, Math.PI*1.9); x.stroke();
-      x.beginPath(); x.arc(ax+12, ay+7, 4, Math.PI*1.1, Math.PI*1.9); x.stroke();
+      const dt = depth[ty*MW+tx];
+      const d = Math.min(1, dt / 7);
+      col.copy(shallow).lerp(deep, d*d);
+      if (dt <= 1 && beachy(tx, ty)) col.lerp(foamCol, 0.45);
+      lx.fillStyle = "#" + col.getHexString();
+      lx.fillRect(tx, ty, 1, 1);
     }
+    const c = document.createElement("canvas");
+    c.width = MW*PPS; c.height = MH*PPS;
+    const x = c.getContext("2d");
+    x.imageSmoothingEnabled = true;
+    x.imageSmoothingQuality = "high";
+    x.drawImage(low, 0, 0, c.width, c.height);
+    return (seaColorCanvas = c);
+  }
+
+  // mar recortado a su silueta; con olas si se pide (la capa animada)
+  function bakeSea(phase, waves){
+    const c = document.createElement("canvas");
+    c.width = MW*PPS; c.height = MH*PPS;
+    const x = c.getContext("2d");
+    x.drawImage(seaColor(), 0, 0);
+    if (waves){
+      const depth = waterDepth();
+      x.strokeStyle = "rgba(232,250,255,.5)"; x.lineCap = "round";
+      for (let ty=0; ty<MH; ty++) for (let tx=0; tx<MW; tx++){
+        if (!isWaterTile(tx, ty) || depth[ty*MW+tx] < 3) continue;
+        const h = hsh(tx*3+1, ty*5+2);
+        if (h % 5) continue;
+        const off = phase ? 6 : 0;
+        const ax = tx*PPS + ((h + off*3) % 12);
+        const ay = ty*PPS + 4 + ((h>>>3) % 10) + (phase ? 3 : 0);
+        const r = 4 + (h>>>7) % 4;
+        const a0 = Math.PI*(1.05 + ((h>>>11) % 20)/100);
+        x.lineWidth = 1.8 + ((h>>>15) % 12)/10;
+        x.beginPath(); x.arc(ax+6, ay, r, a0, a0 + Math.PI*0.7); x.stroke();
+      }
+    }
+    x.globalCompositeOperation = "destination-in";
+    x.drawImage(seaMask(), 0, 0);
+    x.globalCompositeOperation = "source-over";
     return c;
+  }
+  const bakeWaterCanvas = phase => bakeSea(phase, true);
+
+  /* ==========================================================
+     RELIEVE DEL TERRENO
+     El mapa sigue siendo una rejilla plana para la lógica (colisiones y
+     encuentros no cambian), pero el suelo se ondula: alturas guardadas en
+     las esquinas de los tiles y consultadas con terrainY() para apoyar
+     encima props, personajes y cámara.
+
+     Se aplana a cero en caminos, arena, agua, puentes, edificios y puertas:
+     así nada queda torcido ni flotando y el mar no muerde la costa. La
+     máscara se difumina, de modo que la llanura sube en cuestas suaves.
+     ========================================================== */
+  const RELIEF = 1.8;         // altura máxima, en tiles
+  const RELIEF_CELL = 11;     // tamaño de las lomas
+  let heightMap = null;       // Float32Array (MW+1)*(MH+1)
+
+  function terrainY(wx, wz){
+    if (!heightMap) return 0;
+    const W = MW+1;
+    const x = Math.min(MW, Math.max(0, wx)), z = Math.min(MH, Math.max(0, wz));
+    const i0 = Math.min(MW-1, x|0), j0 = Math.min(MH-1, z|0);
+    const tx = x-i0, tz = z-j0;
+    const a = heightMap[j0*W+i0],       b = heightMap[j0*W+i0+1];
+    const c = heightMap[(j0+1)*W+i0],   d = heightMap[(j0+1)*W+i0+1];
+    return (a*(1-tx) + b*tx)*(1-tz) + (c*(1-tx) + d*tx)*tz;
+  }
+
+  const FLAT_GROUND = ["water","sand","bushSand","path","dirtA","plank"];
+  function buildHeightMap(){
+    const W = MW+1, H = MH+1;
+    heightMap = new Float32Array(W*H);
+    if (mode !== "over") return; // solo el mundo exterior tiene lomas
+
+    // 1) ruido de valor en dos octavas: lomas anchas más ondulaciones cortas
+    const ss = t => t*t*(3-2*t);
+    const octave = (cell, seed) => {
+      const gw = Math.ceil(MW/cell)+2, gh = Math.ceil(MH/cell)+2;
+      const g = new Float32Array(gw*gh);
+      for (let j=0;j<gh;j++) for (let i=0;i<gw;i++) g[j*gw+i] = (hsh(i*13+seed, j*29+seed*3) % 1000)/1000;
+      return (x, y) => {
+        const fx = x/cell, fy = y/cell;
+        const i0 = fx|0, j0 = fy|0;
+        const tx = ss(fx-i0), ty = ss(fy-j0);
+        const a = g[j0*gw+i0], b = g[j0*gw+i0+1];
+        const c = g[(j0+1)*gw+i0], d = g[(j0+1)*gw+i0+1];
+        return (a*(1-tx)+b*tx)*(1-ty) + (c*(1-tx)+d*tx)*ty;
+      };
+    };
+    const oct1 = octave(RELIEF_CELL, 5), oct2 = octave(RELIEF_CELL/2.6, 61);
+    const raw = (x, y) => oct1(x, y)*0.72 + oct2(x, y)*0.28;
+    // el ruido de valor se queda cerca de la media: se reescala al rango real
+    // para que las lomas lleguen de verdad arriba y abajo
+    let lo = 1, hi = 0;
+    for (let j=0;j<H;j++) for (let i=0;i<W;i++){
+      const v = raw(i, j);
+      if (v < lo) lo = v;
+      if (v > hi) hi = v;
+    }
+    const span = Math.max(0.001, hi-lo);
+    const noise = (x, y) => (raw(x, y) - lo) / span;
+
+    // 2) qué tiles deben quedarse a nivel
+    const flatTile = (x, y) => {
+      if (x<0 || y<0 || x>=MW || y>=MH) return true;
+      const gt = ground[y][x];
+      if (gt === undefined) return true;
+      if (FLAT_GROUND.includes(gt)) return true;
+      if (gt.indexOf("bri")===0 || gt.indexOf("pier")===0 || gt.indexOf("fence")===0) return true;
+      if (solid[y][x] || decor[y][x]) return true;
+      const m = meta[y][x];
+      if (m && m.type !== "bush") return true;
+      return false;
+    };
+    // el agua manda: se aplana también su entorno para que no aparezcan
+    // taludes cortados justo en la orilla
+    const near = new Uint8Array(MW*MH);
+    for (let y=0;y<MH;y++) for (let x=0;x<MW;x++){
+      if (ground[y][x] !== "water") continue;
+      for (let dy=-2;dy<=2;dy++) for (let dx=-2;dx<=2;dx++){
+        const nx=x+dx, ny=y+dy;
+        if (nx>=0 && ny>=0 && nx<MW && ny<MH) near[ny*MW+nx] = 1;
+      }
+    }
+    // máscara por esquina: 1 solo si los cuatro tiles vecinos admiten cuesta
+    let mask = new Float32Array(W*H);
+    for (let j=0;j<H;j++) for (let i=0;i<W;i++){
+      let ok = 1;
+      for (let dy=-1; dy<=0 && ok; dy++) for (let dx=-1; dx<=0; dx++){
+        const tx = i+dx, ty = j+dy;
+        if (flatTile(tx, ty) || (tx>=0 && ty>=0 && tx<MW && ty<MH && near[ty*MW+tx])){ ok = 0; break; }
+      }
+      mask[j*W+i] = ok;
+    }
+    // difuminar la máscara: la transición llano→loma pasa a ser una rampa
+    const blur = (src, passes) => {
+      let a = src, b = new Float32Array(W*H);
+      for (let p=0; p<passes; p++){
+        for (let j=0;j<H;j++) for (let i=0;i<W;i++){
+          let s = 0, n = 0;
+          for (let dy=-1; dy<=1; dy++) for (let dx=-1; dx<=1; dx++){
+            const ii=i+dx, jj=j+dy;
+            if (ii<0||jj<0||ii>=W||jj>=H) continue;
+            s += a[jj*W+ii]; n++;
+          }
+          b[j*W+i] = s/n;
+        }
+        const t = a; a = b; b = t;
+      }
+      return a;
+    };
+    mask = blur(mask, 4);
+    for (let j=0;j<H;j++) for (let i=0;i<W;i++) heightMap[j*W+i] = noise(i, j) * mask[j*W+i] * RELIEF;
+    heightMap = blur(heightMap, 2);
   }
 
   function buildGroundMesh(){
@@ -1375,12 +1848,54 @@ const World = (() => {
     tex.colorSpace = THREE.SRGBColorSpace;
     tex.anisotropy = 4;
     const mat = own(new THREE.MeshLambertMaterial({ map: tex }));
-    const geoM = own(new THREE.PlaneGeometry(MW, MH));
+    // una celda por tile para poder levantar el relieve vértice a vértice
+    const geoM = own(new THREE.PlaneGeometry(MW, MH, MW, MH));
+    const pos = geoM.attributes.position;
+    for (let k=0; k<pos.count; k++){
+      // tras rotar -90° en X, la Z local del plano es la altura del mundo
+      pos.setZ(k, terrainY(MW/2 + pos.getX(k), MH/2 - pos.getY(k)));
+    }
+    geoM.computeVertexNormals();
     const mesh = new THREE.Mesh(geoM, mat);
     mesh.rotation.x = -Math.PI/2;
     mesh.position.set(MW/2, 0, MH/2);
     mesh.receiveShadow = true;
     worldGroup.add(mesh);
+    // Faldón: una llanura enorme justo por debajo del mapa para que el borde
+    // no se recorte contra el vacío; la niebla la funde con el fondo.
+    const SKIRT = { over:"#67b352", pueblo:"#67b352", cueva:"#3a3348" };
+    if (SKIRT[mode]){
+      const skirt = new THREE.Mesh(
+        own(new THREE.PlaneGeometry(MW*6, MH*6)),
+        own(new THREE.MeshLambertMaterial({ color: SKIRT[mode] })));
+      skirt.rotation.x = -Math.PI/2;
+      skirt.position.set(MW/2, -0.08, MH/2);
+      worldGroup.add(skirt);
+    }
+  }
+
+  /* ---------- cielo ----------
+     Cúpula con degradado vertical que acompaña a la cámara. Da el azul
+     limpio y el horizonte lechoso de los juegos de Pokémon; la niebla usa
+     el mismo tono bajo para que el mundo se disuelva sin línea de corte. */
+  let skyDome = null;
+  const SKY_STOPS = [[0, "#2f9fe8"], [0.4, "#79cef8"], [0.72, "#bfe8ff"], [1, "#e8f6ff"]];
+  const SKY_HORIZON = "#cfeaff";
+  function buildSkyDome(){
+    const c = document.createElement("canvas");
+    c.width = 4; c.height = 256;
+    const x = c.getContext("2d");
+    const grd = x.createLinearGradient(0, 0, 0, 256);
+    SKY_STOPS.forEach(([p, col]) => grd.addColorStop(p, col));
+    x.fillStyle = grd;
+    x.fillRect(0, 0, 4, 256);
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const dome = new THREE.Mesh(
+      new THREE.SphereGeometry(140, 24, 16),
+      new THREE.MeshBasicMaterial({ map: tex, side: THREE.BackSide, fog: false }));
+    dome.renderOrder = -1;
+    return dome;
   }
 
   function buildWaterMesh(){
@@ -1433,6 +1948,7 @@ const World = (() => {
     const chests = [], fencesH = [], fencesV = [];
     const planks = [], rails = [];
     const caveRocks = [], caveWallRocks = [];
+    const smallBushes = [], logs = [], shore = [];
     let saveSpot = null;
 
     // --- decor (objetos anclados) ---
@@ -1440,12 +1956,13 @@ const World = (() => {
       const d = decor[y][x];
       if (!d) continue;
       if (d.sprite === "tree"){
-        trees.push({ x: x+2, z: y+3.5, data: Paper.treeData() });
+        trees.push({ x: x+2, z: y+3.5, h: hsh(x, y) });
       } else if (HOUSE_VARIANT[d.sprite]){
         const variant = HOUSE_VARIANT[d.sprite];
-        const h = Paper.house(variant);
+        const h = buildHouseMesh(variant, d);
         h.position.set(x+3, 0, y+6);
         worldGroup.add(h);
+        const labelY = (houseHeight || 4.4) + 0.6;
         // etiquetas
         if (d.gym){
           const g = Data.gyms.find(k => k.key === d.gym);
@@ -1453,15 +1970,15 @@ const World = (() => {
           const cleared = s.badges.includes(g.key);
           const locked = !Quests.isGymUnlocked(g.key) || Quests.level() < Quests.gymLevelReq(g.key);
           const label = cleared ? "🏆 " + g.icon : (locked ? "🔒 " + g.icon : g.icon);
-          addLabel(label, x+3, 4.9, y+5.6,
+          addLabel(label, x+3, labelY, y+5.6,
             cleared ? { bg:"#fff3c9", fg:"#b8860b" } : locked ? { bg:"#e8e6f0", fg:"#7a7790" } : { bg:"#fffdf4", fg:"#33314e" });
         }
-        else if (d.shop)     addLabel("상점 🛒",  x+3, 4.9, y+5.6, { fg:"#2f9e5b" });
-        else if (d.alcaldia) addLabel("시청 🏛",  x+3, 4.9, y+5.6, { fg:"#b8860b" });
-        else if (d.casa)     addLabel("집 Casa",  x+3, 4.9, y+5.6, { fg:"#e05575" });
-        else if (d.cafe)     addLabel("카페 ☕",  x+3, 4.9, y+5.6, { fg:"#a0653a" });
-        else if (d.academia) addLabel("학원 📚",  x+3, 4.9, y+5.6, { fg:"#4361ee" });
-        else if (d.norebang) addLabel("노래방 🎤", x+3, 4.9, y+5.6, { fg:"#d6336c" });
+        else if (d.shop)     addLabel("상점 🛒", x+3, labelY, y+5.6, { fg:"#2f9e5b" });
+        else if (d.alcaldia) addLabel("시청 🏛", x+3, labelY, y+5.6, { fg:"#b8860b" });
+        else if (d.casa)     addLabel("집 Casa", x+3, labelY, y+5.6, { fg:"#e05575" });
+        else if (d.cafe)     addLabel("카페 ☕", x+3, labelY, y+5.6, { fg:"#a0653a" });
+        else if (d.academia) addLabel("학원 📚", x+3, labelY, y+5.6, { fg:"#4361ee" });
+        else if (d.norebang) addLabel("노래방 🎤", x+3, labelY, y+5.6, { fg:"#d6336c" });
       } else if (d.sprite === "caveDoor"){
         const arch = Paper.caveArchMesh();
         arch.position.set(x+2, 0, y+1.2);
@@ -1484,15 +2001,16 @@ const World = (() => {
       const g = ground[y][x];
       const cx = x+0.5, cz = y+0.5;
       const m = meta[y][x];
-      if (g === "tallgrass") tufts.push({ x:cx, z:cz, s: 0.95 + (hsh(x,y)%40)/100 });
-      else if (g === "tuft") tufts.push({ x:cx, z:cz, s: 0.55 });
-      else if (g === "flower")  flowers.push({ x:cx, z:cz, col:"#ffffff" });
-      else if (g === "flower2") flowers.push({ x:cx, z:cz, col:"#ff6b6b" });
-      else if (g === "flower3") flowers.push({ x:cx, z:cz, col:"#ffd94a" });
-      else if (g === "mush") mushs.push({ x:cx, z:cz });
-      else if (g === "rock") rocks.push({ x:cx, z:cz, s: 0.7 + (hsh(x,y)%50)/100 });
-      else if (g === "caveRock") caveRocks.push({ x:cx, z:cz });
-      else if (g === "bush" || g === "bushSand") bushes.push({ x:cx, z:cz });
+      const th = hsh(x, y);
+      if (g === "tallgrass") tufts.push({ x:cx, z:cz, s: 0.95 + (th%40)/100, h:th, tall:true });
+      else if (g === "tuft") tufts.push({ x:cx, z:cz, s: 0.55, h:th });
+      else if (g === "flower")  flowers.push({ x:cx, z:cz, h:th });
+      else if (g === "flower2") flowers.push({ x:cx, z:cz, h:th+1 });
+      else if (g === "flower3") flowers.push({ x:cx, z:cz, h:th+2 });
+      else if (g === "mush") mushs.push({ x:cx, z:cz, h:th });
+      else if (g === "rock") rocks.push({ x:cx, z:cz, s: 0.7 + (th%50)/100, h:th });
+      else if (g === "caveRock") caveRocks.push({ x:cx, z:cz, h:th });
+      else if (g === "bush" || g === "bushSand") bushes.push({ x:cx, z:cz, h:th });
       else if (g === "chest") chests.push({ x:cx, z:cz });
       else if (g === "fenceV") fencesV.push({ x:cx, z:cz });
       else if (g && g.indexOf("fence")===0) fencesH.push({ x:cx, z:cz });
@@ -1513,7 +2031,7 @@ const World = (() => {
     if (mode === "cueva"){
       for (let y=0; y<MH; y++) for (let x=0; x<MW; x++){
         if (x===0 || y===0 || x===MW-1 || y===MH-1 || y===1 || y===2)
-          caveWallRocks.push({ x:x+0.5, z:y+0.5, s: 1.0 + (hsh(x,y)%40)/100 });
+          caveWallRocks.push({ x:x+0.5, z:y+0.5, s: 1.0 + (hsh(x,y)%40)/100, h: hsh(x,y) });
       }
     }
 
@@ -1522,26 +2040,36 @@ const World = (() => {
     // no altera caminos, puertas, encuentros ni la lógica del juego.
     if (mode === "over" || mode === "pueblo"){
       const npcAt = new Set(npcsCur.map(n => n.x + "," + n.y));
-      const free = (x, y) =>
-        ground[y] && ground[y][x] === "grass" && !solid[y][x] && !decor[y][x] &&
-        !meta[y][x] && !npcAt.has(x + "," + y) &&
+      const walkable = (x, y) =>
+        ground[y] && !solid[y][x] && !decor[y][x] && !meta[y][x] &&
+        !npcAt.has(x + "," + y) &&
         !(saveSpot && saveSpot.x === x+0.5 && saveSpot.z === y+0.5);
+      const free = (x, y) => walkable(x, y) && ground[y][x] === "grass";
+      // playa: madera a la deriva, riscos y guijarros del pack
+      for (let y=1; y<MH-1; y++) for (let x=1; x<MW-1; x++){
+        if (!walkable(x, y) || ground[y][x] !== "sand") continue;
+        const h = hsh(x*5+11, y*7+3) % 1000;
+        const cx = x+0.5, cz = y+0.5;
+        if (h < 26)      shore.push({ x:cx, z:cz, h, kind:"crag" });
+        else if (h < 60) shore.push({ x:cx, z:cz, h, kind:"drift" });
+        else if (h < 130) shore.push({ x:cx, z:cz, h, kind:"pebble" });
+        else if (h < 150) tufts.push({ x:cx, z:cz, s: 0.5 + (h%30)/100, h });
+      }
       let specialCount = 0;
       const maxSpecials = mode === "over" ? 26 : 10;
       for (let y=1; y<MH-1; y++) for (let x=1; x<MW-1; x++){
         if (!free(x, y)) continue;
         const h = hsh(x, y) % 1000;
         const cx = x+0.5, cz = y+0.5;
-        if (h < 90){ // 9% flores sueltas de colores
-          const cols = ["#ffffff", "#ff6b6b", "#ffd94a", "#ff70a6", "#a259ff", "#5ec2ee"];
-          flowers.push({ x:cx, z:cz, col: cols[h % cols.length] });
-        }
-        else if (h < 150) tufts.push({ x:cx, z:cz, s: 0.4 + (h%30)/100 }); // 6% hierbecilla
-        else if (h < 175) mushs.push({ x:cx, z:cz });                     // 2.5% setas
-        else if (h < 200) rocks.push({ x:cx, z:cz, s: 0.35 + (h%25)/100 }); // 2.5% piedritas
-        else if (h < 224 && specialCount < maxSpecials && free(x+1, y)){   // 2.4% piezas especiales
-          // bancos, señales, troncos, faroles de piedra, molinillos, macizos
-          const kind = hsh(x*3+1, y*7+5) % 6;
+        if (h < 130) flowers.push({ x:cx, z:cz, h });                       // 13% flores
+        else if (h < 215) tufts.push({ x:cx, z:cz, s: 0.4 + (h%30)/100, h }); // 8.5% hierbecilla
+        else if (h < 240) mushs.push({ x:cx, z:cz, h });                    // 2.5% setas
+        else if (h < 272) rocks.push({ x:cx, z:cz, s: 0.35 + (h%25)/100, h }); // 3% piedritas
+        else if (h < 288) smallBushes.push({ x:cx, z:cz, h });              // 1.6% matas
+        else if (h < 300) logs.push({ x:cx, z:cz, h });                     // 1.2% troncos caídos
+        else if (h < 324 && specialCount < maxSpecials && free(x+1, y)){    // 2.4% piezas especiales
+          // bancos, señales, troncos, faroles de piedra, peñascos
+          const kind = hsh(x*3+1, y*7+5) % 5;
           // las piezas voluminosas solo en zonas muy abiertas (8 alrededor libres
           // o césped sin nada) y se vuelven sólidas para no atravesarlas
           const bulky = kind <= 3;
@@ -1551,11 +2079,10 @@ const World = (() => {
           let m2 = null;
           if (kind === 0) m2 = Paper.benchMesh();
           else if (kind === 1) m2 = Paper.signpostMesh();
-          else if (kind === 2) m2 = Paper.logMesh();
-          else if (kind === 3) m2 = Paper.stoneLanternMesh();
-          else if (kind === 4){ m2 = Paper.pinwheelMesh(hsh(x, y) % 6); animPinwheels.push(m2); }
-          else m2 = Paper.flowerPatchMesh();
-          m2.position.set(cx, 0, cz);
+          else if (kind === 2) m2 = Paper.stoneLanternMesh();
+          else if (kind === 3){ logs.push({ x:cx, z:cz, h: hsh(x,y) }); specialCount++; continue; }
+          else { rocks.push({ x:cx, z:cz, s: 1.4, h: hsh(x,y) }); specialCount++; continue; }
+          m2.position.set(cx, terrainY(cx, cz), cz);
           m2.rotation.y = (hsh(x+9, y+9) % 628) / 100;
           worldGroup.add(m2);
           if (bulky) solid[y][x] = 1;
@@ -1564,118 +2091,235 @@ const World = (() => {
       }
     }
 
-    // --- instanciados ---
+    // --- instanciados con los modelos del pack StylisedEnv ---
     const M = new THREE.Matrix4(), Q = new THREE.Quaternion(), P = new THREE.Vector3(), S = new THREE.Vector3();
     const Euler = new THREE.Euler();
+    const has3D = typeof ENV_PROPS !== "undefined" && typeof ENV_ASSETS !== "undefined";
+    const batch = instancer();
+    const pm = has3D ? propMaterial() : null;
+    const fm = has3D ? foliageMaterial() : null;
+    const rot = h => ((h % 628) / 100);
+    envPropsCount = 0;
 
-    if (trees.length){
-      const trunk = new THREE.InstancedMesh(Paper.geo("trunk", () => new THREE.CylinderGeometry(0.12, 0.18, 1, 7)), Paper.lambert("#8a5a2b"), trees.length);
-      const blobMat = own(new THREE.MeshLambertMaterial({ color: 0xffffff }));
-      const blobs = new THREE.InstancedMesh(Paper.geo("canopy", () => new THREE.SphereGeometry(1, 10, 8)), blobMat, trees.length*3);
-      trees.forEach((t, i) => {
-        M.compose(P.set(t.x, t.data.trunkH/2, t.z), Q, S.set(1, t.data.trunkH, 1));
-        trunk.setMatrixAt(i, M);
-        t.data.blobs.forEach((b, j) => {
-          M.compose(P.set(t.x+b.dx, b.dy, t.z+b.dz), Q, S.set(b.s, b.s*0.8, b.s));
-          const k = i*3+j;
-          blobs.setMatrixAt(k, M);
-          blobs.setColorAt(k, new THREE.Color(b.col));
+    // Árboles: tronco curvo del pack + racimo de copas, como en el diorama
+    // original. La copa se apoya sobre el tronco y varía en tamaño y tono.
+    if (trees.length && has3D){
+      const trunkH = propSize(P3.TRUNK)[1];
+      trees.forEach(t => {
+        const h = t.h;
+        const s = ES * (0.82 + (h % 26)/100);
+        batch.add("trunk", propGeo(P3.TRUNK), pm, { x:t.x, z:t.z, s, rot: rot(h) });
+        const top = trunkH * s;
+        CANOPY_LAYOUT.forEach((b, j) => {
+          const hh = hsh(h + j*7, j*13);
+          const idx = pickFrom(P3.CANOPY, hh);
+          const cs = s * b.s * (0.92 + (hh % 18)/100);
+          batch.add("canopy" + idx, propGeo(idx), pm, {
+            x: t.x + b.dx*s, z: t.z + b.dz*s, y: top*b.dy,
+            s: cs, rot: rot(hh), color: CANOPY_TINTS[hh % CANOPY_TINTS.length],
+          });
         });
+      });
+    } else if (trees.length){
+      // sin el pack cargado: árbol de emergencia (esferas) para no dejar el mapa pelado
+      const trunk = new THREE.InstancedMesh(Paper.geo("trunk", () => new THREE.CylinderGeometry(0.12, 0.18, 1, 7)), Paper.lambert("#8a5a2b"), trees.length);
+      const blobMat = own(new THREE.MeshLambertMaterial({ color: 0x6fbf4a }));
+      const blobs = new THREE.InstancedMesh(Paper.geo("canopy", () => new THREE.SphereGeometry(1, 10, 8)), blobMat, trees.length);
+      trees.forEach((t, i) => {
+        M.compose(P.set(t.x, 0.5, t.z), Q, S.set(1, 1, 1));
+        trunk.setMatrixAt(i, M);
+        M.compose(P.set(t.x, 1.4, t.z), Q, S.set(0.9, 0.75, 0.9));
+        blobs.setMatrixAt(i, M);
       });
       trunk.castShadow = blobs.castShadow = true;
       own(trunk); own(blobs);
       worldGroup.add(trunk, blobs);
     }
 
+    // Hierba: las briznas recortadas siguen dando la silueta clásica de
+    // "hierba alta" de Pokémon; encima se siembran helechos del pack.
     if (tufts.length){
       if (!grassTuftTexture) grassTuftTexture = Paper.canvasTex(Paper.grassBladeTexture());
       const tm = own(new THREE.MeshLambertMaterial({ map: grassTuftTexture, transparent: true, alphaTest: 0.35, side: THREE.DoubleSide }));
-      const inst = new THREE.InstancedMesh(Paper.geo("tuftX", makeCrossedQuad), tm, tufts.length);
-      tufts.forEach((t, i) => {
-        Euler.set(0, (hsh(i, 7) % 628)/100, 0);
-        Q.setFromEuler(Euler);
-        M.compose(P.set(t.x, 0, t.z), Q, S.set(t.s, t.s, t.s));
+      const blades = [];
+      tufts.forEach(t => {
+        blades.push({ x:t.x, z:t.z, s:t.s, r: rot(t.h || 0) });
+        if (t.tall){ // las matas de encuentro son más densas y altas
+          blades.push({ x: t.x + 0.26, z: t.z - 0.2, s: t.s*0.8, r: rot((t.h||0)+31) });
+          blades.push({ x: t.x - 0.24, z: t.z + 0.22, s: t.s*0.75, r: rot((t.h||0)+59) });
+        }
+      });
+      const inst = new THREE.InstancedMesh(Paper.geo("tuftX", makeCrossedQuad), tm, blades.length);
+      blades.forEach((b, i) => {
+        Euler.set(0, b.r, 0); Q.setFromEuler(Euler);
+        M.compose(P.set(b.x, terrainY(b.x, b.z), b.z), Q, S.set(b.s, b.s*1.25, b.s));
         inst.setMatrixAt(i, M);
       });
       Q.identity();
       own(inst);
       worldGroup.add(inst);
-    }
-
-    if (flowers.length){
-      const stems = new THREE.InstancedMesh(Paper.geo("stem", () => new THREE.CylinderGeometry(0.03, 0.03, 0.24, 5)), Paper.lambert("#3f8b4b"), flowers.length);
-      const headMat = own(new THREE.MeshLambertMaterial({ color: 0xffffff }));
-      const heads = new THREE.InstancedMesh(Paper.geo("fhead", () => new THREE.SphereGeometry(0.1, 8, 6)), headMat, flowers.length);
-      flowers.forEach((f, i) => {
-        M.compose(P.set(f.x, 0.12, f.z), Q, S.set(1, 1, 1));
-        stems.setMatrixAt(i, M);
-        M.compose(P.set(f.x, 0.3, f.z), Q, S.set(1, 0.85, 1));
-        heads.setMatrixAt(i, M);
-        heads.setColorAt(i, new THREE.Color(f.col));
-      });
-      own(stems); own(heads);
-      worldGroup.add(stems, heads);
-    }
-
-    if (mushs.length){
-      const inst = new THREE.InstancedMesh(Paper.geo("mush", () => new THREE.SphereGeometry(0.14, 8, 6)), Paper.lambert("#e0563c"), mushs.length);
-      mushs.forEach((t, i) => {
-        M.compose(P.set(t.x, 0.08, t.z), Q, S.set(1, 0.6, 1));
-        inst.setMatrixAt(i, M);
-      });
-      own(inst);
-      worldGroup.add(inst);
-    }
-
-    const allRocks = rocks.concat(caveWallRocks);
-    if (allRocks.length){
-      const inst = new THREE.InstancedMesh(Paper.geo("rock", () => new THREE.DodecahedronGeometry(0.32, 0)), Paper.lambert(mode==="cueva" ? "#6a6478" : "#9aa0a8"), allRocks.length);
-      allRocks.forEach((t, i) => {
-        Euler.set(0, (hsh(i, 3) % 628)/100, 0); Q.setFromEuler(Euler);
-        const s = t.s || 1;
-        M.compose(P.set(t.x, 0.16*s, t.z), Q, S.set(s, s*0.75, s));
-        inst.setMatrixAt(i, M);
-      });
-      Q.identity();
-      inst.castShadow = true;
-      own(inst);
-      worldGroup.add(inst);
-    }
-
-    if (caveRocks.length){
-      const mat2 = own(new THREE.MeshLambertMaterial({ color: 0xffffff }));
-      const inst = new THREE.InstancedMesh(Paper.geo("canopy", () => new THREE.SphereGeometry(1, 10, 8)), mat2, caveRocks.length);
-      caveRocks.forEach((t, i) => {
-        M.compose(P.set(t.x, 0.3, t.z), Q, S.set(0.4, 0.34, 0.4));
-        inst.setMatrixAt(i, M);
-        inst.setColorAt(i, new THREE.Color("#8a84a0"));
-      });
-      inst.castShadow = true;
-      own(inst);
-      worldGroup.add(inst);
-    }
-
-    if (bushes.length){
-      const bushMat = own(new THREE.MeshLambertMaterial({ color: 0xffffff }));
-      const inst = new THREE.InstancedMesh(Paper.geo("canopy", () => new THREE.SphereGeometry(1, 10, 8)), bushMat, bushes.length*3);
-      const BC = ["#1e7038", "#2f8f4a", "#14522a"];
-      const BLOBS = [[0, 0.32, 0, 0.42], [-0.28, 0.22, 0.08, 0.3], [0.28, 0.24, -0.06, 0.32]];
-      bushes.forEach((t, i) => {
-        BLOBS.forEach(([dx, dy, dz, s], j) => {
-          M.compose(P.set(t.x+dx, dy, t.z+dz), Q, S.set(s, s*0.85, s));
-          const k = i*3+j;
-          inst.setMatrixAt(k, M);
-          inst.setColorAt(k, new THREE.Color(BC[(i+j) % 3]));
+      if (has3D) tufts.forEach(t => {
+        const h = t.h || 0;
+        if (h % 3) return; // solo un tercio lleva helecho, para no recargar
+        const idx = pickFrom(A3.FERN, h >>> 2);
+        batch.add("fern" + idx, assetGeo(idx), fm, {
+          x: t.x + ((h>>>5)%14 - 7)/40, z: t.z + ((h>>>9)%14 - 7)/40,
+          s: ES*0.62*t.s, sy: ES*0.95*t.s, rot: rot(h),
         });
       });
-      inst.castShadow = true;
-      own(inst);
-      worldGroup.add(inst);
     }
+
+    // Flores del pack (con su textura recortada) + pétalos a ras de suelo
+    if (flowers.length && has3D){
+      flowers.forEach(f => {
+        const h = f.h;
+        const idx = pickFrom(A3.FLOWER, h);
+        batch.add("flow" + idx, assetGeo(idx), fm, {
+          x: f.x + ((h>>>4)%16 - 8)/45, z: f.z + ((h>>>8)%16 - 8)/45,
+          s: ES * (0.75 + (h % 30)/100), rot: rot(h),
+        });
+        if (h % 4 === 0){
+          const gi = pickFrom(A3.GROUNDCOVER, h >>> 3);
+          batch.add("gcov" + gi, assetGeo(gi), fm, {
+            x: f.x + ((h>>>11)%20 - 10)/32, z: f.z + ((h>>>15)%20 - 10)/32,
+            s: ES * 0.9, rot: rot(h*3),
+          });
+        }
+      });
+    }
+
+    // Setas: sombrerito rojo con lunares sobre pie crema
+    if (mushs.length){
+      const capMat = own(new THREE.MeshLambertMaterial({ color: 0xffffff }));
+      const caps = new THREE.InstancedMesh(Paper.geo("mushCap", () => {
+        const g = new THREE.SphereGeometry(0.11, 9, 6, 0, Math.PI*2, 0, Math.PI/2);
+        g.scale(1, 0.8, 1);
+        return g;
+      }), capMat, mushs.length);
+      const stems = new THREE.InstancedMesh(
+        Paper.geo("mushStem", () => new THREE.CylinderGeometry(0.035, 0.05, 0.13, 6)),
+        Paper.lambert("#f6ecd8"), mushs.length);
+      const MC = ["#d4604a", "#c4566e", "#dd8f4a", "#b8515f"];
+      mushs.forEach((t, i) => {
+        const h = t.h || i, gy = terrainY(t.x, t.z);
+        M.compose(P.set(t.x, gy+0.065, t.z), Q, S.set(1, 1, 1));
+        stems.setMatrixAt(i, M);
+        M.compose(P.set(t.x, gy+0.12, t.z), Q, S.set(1, 1, 1));
+        caps.setMatrixAt(i, M);
+        caps.setColorAt(i, TMPCOL.set(MC[h % MC.length]));
+      });
+      caps.castShadow = stems.castShadow = true;
+      own(caps); own(stems);
+      worldGroup.add(caps, stems);
+    }
+
+    // Piedras y peñascos: guijarros, losas y rocas del pack según el tamaño
+    if (has3D){
+      rocks.forEach(t => {
+        const h = t.h || 0, s = t.s || 1;
+        let idx, sc;
+        if (s < 0.5){ idx = pickFrom(P3.PEBBLE, h);   sc = ES * (1.0 + (h%40)/100); }
+        else if (s < 0.9){ idx = pickFrom(A3.ROCK_SMALL, h); sc = ES * (0.8 + (h%40)/100);
+          batch.add("arock" + idx, assetGeo(idx), plainMaterial(), { x:t.x, z:t.z, s:sc, rot: rot(h), color:"#b3baad" });
+          return;
+        }
+        else { idx = pickFrom(P3.BOULDER, h); sc = ES * (0.55 + (h%35)/100); }
+        batch.add("rock" + idx, propGeo(idx), pm, { x:t.x, z:t.z, s:sc, rot: rot(h) });
+      });
+      // riscos del borde de la cueva
+      caveWallRocks.forEach(t => {
+        const h = t.h || 0;
+        const idx = pickFrom(h % 2 ? P3.CRAG : P3.DARKCRAG, h >> 2);
+        batch.add("crag" + idx, propGeo(idx), pm, {
+          x:t.x, z:t.z, s: ES * (0.7 + (h%50)/100) * (t.s||1), rot: rot(h), color:"#c9c2e8",
+        });
+      });
+      // rocas-guarida de guardianes dentro de la cueva
+      caveRocks.forEach(t => {
+        const h = t.h || 0;
+        const idx = pickFrom(P3.BOULDER, h);
+        batch.add("crock" + idx, propGeo(idx), pm, {
+          x:t.x, z:t.z, s: ES*0.8, rot: rot(h), color:"#d6c7ff",
+        });
+      });
+      // orilla: riscos, madera a la deriva y guijarros
+      shore.forEach(t => {
+        const h = t.h;
+        if (t.kind === "crag"){
+          const idx = pickFrom(P3.CRAG, h);
+          batch.add("crag" + idx, propGeo(idx), pm, { x:t.x, z:t.z, s: ES*(0.45+(h%30)/100), rot: rot(h) });
+        } else if (t.kind === "drift"){
+          const idx = pickFrom(P3.DRIFT, h);
+          batch.add("drift" + idx, propGeo(idx), pm, { x:t.x, z:t.z, s: ES*(0.7+(h%40)/100), rot: rot(h) });
+        } else {
+          const idx = pickFrom(P3.PEBBLE, h);
+          batch.add("rock" + idx, propGeo(idx), pm, { x:t.x, z:t.z, s: ES*(0.9+(h%50)/100), rot: rot(h) });
+        }
+      });
+      // troncos caídos de la pradera
+      logs.forEach(t => {
+        const idx = pickFrom(P3.LOG, t.h);
+        batch.add("log" + idx, propGeo(idx), pm, { x:t.x, z:t.z, s: ES*(0.7+(t.h%40)/100), rot: rot(t.h) });
+      });
+      // matas sueltas
+      smallBushes.forEach(t => {
+        const idx = pickFrom(P3.BUSH, t.h);
+        batch.add("sbush" + idx, propGeo(idx), pm, {
+          x:t.x, z:t.z, s: ES*(0.5+(t.h%35)/100), rot: rot(t.h),
+          color: CANOPY_TINTS[t.h % CANOPY_TINTS.length],
+        });
+      });
+    } else {
+      const allRocks = rocks.concat(caveWallRocks);
+      if (allRocks.length){
+        const inst = new THREE.InstancedMesh(Paper.geo("rock", () => new THREE.DodecahedronGeometry(0.32, 0)), Paper.lambert(mode==="cueva" ? "#6a6478" : "#9aa0a8"), allRocks.length);
+        allRocks.forEach((t, i) => {
+          Euler.set(0, rot(t.h || i), 0); Q.setFromEuler(Euler);
+          const s = t.s || 1;
+          M.compose(P.set(t.x, 0.16*s, t.z), Q, S.set(s, s*0.75, s));
+          inst.setMatrixAt(i, M);
+        });
+        Q.identity();
+        inst.castShadow = true;
+        own(inst);
+        worldGroup.add(inst);
+      }
+    }
+
+    // Arbustos de guardianes: mata de tres bolas del pack, en verde intenso
+    // para que se distingan de la vegetación de adorno.
+    if (bushes.length){
+      const BLOBS = [[0, 0, 0, 0.62], [-0.3, 0.06, 0.1, 0.44], [0.3, 0.07, -0.08, 0.46]];
+      const BC = ["#e8ffcf", "#cdf2a8", "#b6e594"];
+      bushes.forEach((t, i) => {
+        BLOBS.forEach(([dx, dy, dz, s], j) => {
+          const h = (t.h || i) + j*17;
+          if (has3D){
+            const idx = pickFrom(P3.BUSH, h);
+            batch.add("gbush" + idx, propGeo(idx), pm, {
+              x: t.x+dx, y: dy, z: t.z+dz, s: ES*s, rot: rot(h), color: BC[j],
+            });
+          }
+        });
+      });
+      if (!has3D){
+        const bushMat = own(new THREE.MeshLambertMaterial({ color: 0x2f8f4a }));
+        const inst = new THREE.InstancedMesh(Paper.geo("canopy", () => new THREE.SphereGeometry(1, 10, 8)), bushMat, bushes.length);
+        bushes.forEach((t, i) => {
+          M.compose(P.set(t.x, 0.3, t.z), Q, S.set(0.45, 0.4, 0.45));
+          inst.setMatrixAt(i, M);
+        });
+        inst.castShadow = true;
+        own(inst);
+        worldGroup.add(inst);
+      }
+    }
+
+    batch.flush();
 
     chests.forEach(t => {
       const c = Paper.chestMesh();
-      c.position.set(t.x, 0, t.z);
+      c.position.set(t.x, terrainY(t.x, t.z), t.z);
       worldGroup.add(c);
     });
     fencesH.forEach(t => { const f = Paper.fenceMesh(true);  f.position.set(t.x, 0, t.z); worldGroup.add(f); });
@@ -1702,7 +2346,7 @@ const World = (() => {
 
     if (saveSpot){
       const sp = Paper.saveSparkle();
-      sp.position.set(saveSpot.x, 0, saveSpot.z);
+      sp.position.set(saveSpot.x, terrainY(saveSpot.x, saveSpot.z), saveSpot.z);
       worldGroup.add(sp);
       animSparkles.push(sp);
     }
@@ -1760,8 +2404,8 @@ const World = (() => {
     return m;
   }
   function makeCharPlane(pair, w, h){
-    const texF = own(Paper.canvasTex(pair.front));
-    const texB = own(Paper.canvasTex(pair.back));
+    const texF = own(Paper.canvasTex(pair.front, { sharp: true }));
+    const texB = own(Paper.canvasTex(pair.back, { sharp: true }));
     const mat = own(new THREE.MeshBasicMaterial({ map: texF, transparent: true, alphaTest: 0.1, side: THREE.DoubleSide }));
     const plane = new THREE.Mesh(Paper.geo("charPlane", () => new THREE.PlaneGeometry(1, 1)), mat);
     plane.scale.set(w, h, 1);
@@ -1784,10 +2428,23 @@ const World = (() => {
 
     // NPCs
     npcsCur.forEach((n, i) => {
-      const np = npcChars(n);
       const ng = new THREE.Group();
       ng.add(makeBlobShadow());
-      const ncp = makeCharPlane(np, 0.9, 1.2);
+      let ncp;
+      if (n.creature){
+        // NPCs que no son personas (el gato de casa): se dibujan con su
+        // sprite de criatura en vez del muñeco de papel
+        const cv = Paper.svgCanvas(Creatures.petSprite(n.creature), 192, 14);
+        const tex = own(Paper.canvasTex(cv, { sharp: true }));
+        Paper.watch(cv, tex);
+        const mat = own(new THREE.MeshBasicMaterial({ map: tex, transparent: true, alphaTest: 0.1, side: THREE.DoubleSide }));
+        const plane = new THREE.Mesh(Paper.geo("charPlane", () => new THREE.PlaneGeometry(1, 1)), mat);
+        plane.scale.set(0.66, 0.66, 1);
+        plane.position.y = 0.34;
+        ncp = { plane, mat, texF: tex, texB: tex };
+      } else {
+        ncp = makeCharPlane(npcChars(n), 0.9, 1.2);
+      }
       ng.add(ncp.plane);
       // bocadillo "…"
       const bcv = Paper.bubble();
@@ -1808,8 +2465,8 @@ const World = (() => {
   function refreshPetVis(){
     if (petVis){ worldGroup.remove(petVis.group); petVis = null; }
     if (!pet) return;
-    const c = Paper.svgCanvas(Creatures.petSprite(pet.key), 128, 10);
-    const tex = own(Paper.canvasTex(c));
+    const c = Paper.svgCanvas(Creatures.petSprite(pet.key), 192, 14);
+    const tex = own(Paper.canvasTex(c, { sharp: true }));
     Paper.watch(c, tex);
     const mat = own(new THREE.MeshBasicMaterial({ map: tex, transparent: true, alphaTest: 0.1, side: THREE.DoubleSide }));
     const g = new THREE.Group();
@@ -1827,7 +2484,7 @@ const World = (() => {
     if (mode === "over"){
       farmAnimals.forEach(a => {
         const c = animalCanvas(a.kind);
-        const tex = own(Paper.canvasTex(c));
+        const tex = own(Paper.canvasTex(c, { sharp: true }));
         const mat = own(new THREE.MeshBasicMaterial({ map: tex, transparent: true, alphaTest: 0.1, side: THREE.DoubleSide }));
         const g = new THREE.Group();
         g.add(makeBlobShadow());
@@ -1893,86 +2550,175 @@ const World = (() => {
     seaHouseVis = g;
   }
 
-  // ---------- props individuales StylisedEnv (js/envProps.js) ----------
-  // Piezas del diorama separadas por componentes: árboles (tronco+copa),
-  // arbustos, rocas, troncos caídos, piedras y madera a la deriva.
-  let envPropsRaw = null; // buffers decodificados (una sola vez)
-  let envPropsCount = 0; // para debug()
-  function buildEnvProps(){
-    if (mode !== "over" || typeof ENV_PROPS === "undefined") return;
-    if (!envPropsRaw){
-      envPropsRaw = ENV_PROPS.objects.map(o => ({
-        pos: b64ToF32(o.pos), nor: o.nor ? b64ToF32(o.nor) : null,
-        col: o.col ? b64ToF32(o.col) : null,
-        idx: o.idx ? b64ToU32(o.idx) : null,
-        size: o.size,
+  /* ---------- cuarto de Karol (pack free-isometric-rooms) ----------
+     Habitación completa con cama, escritorio y ventana: sustituye al suelo
+     y las paredes procedurales cuando estamos dentro de casa. El modelo trae
+     dos muros y se gira 180° para que la parte abierta mire a la cámara. */
+  const HOME_ROOM = {
+    scale: 5.2,       // tiles por unidad del modelo
+    squash: 0.82,     // los muros del asset son muy altos para la escala del juego
+    x: 3.5, z: 5.2,   // centro del cuarto en tiles
+    floor: 0.115,     // altura de la tarima sobre la base del modelo
+    rotY: Math.PI,
+  };
+  let homeRoomRaw = null;
+  function buildHomeRoom(){
+    if (mode !== "casa" || typeof HOME_ROOM_MODEL === "undefined") return false;
+    if (!homeRoomRaw){
+      homeRoomRaw = HOME_ROOM_MODEL.meshes.map(m => ({
+        pos: b64ToF32(m.pos), nor: m.nor ? b64ToF32(m.nor) : null,
+        uv: m.uv ? b64ToF32(m.uv) : null,
+        idx: m.idx ? b64ToU32(m.idx) : null,
       }));
     }
-    const geos = {};
-    const getGeo = i => geos[i] || (geos[i] = (() => {
-      const o = envPropsRaw[i];
-      const g = own(new THREE.BufferGeometry());
-      g.setAttribute("position", new THREE.BufferAttribute(o.pos, 3));
-      if (o.nor) g.setAttribute("normal", new THREE.BufferAttribute(o.nor, 3));
-      else g.computeVertexNormals();
-      if (o.col) g.setAttribute("color", new THREE.BufferAttribute(o.col, 3));
-      if (o.idx) g.setIndex(new THREE.BufferAttribute(o.idx, 1));
-      return g;
-    })());
-    const propMat = own(new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide }));
+    const tex = own(new THREE.TextureLoader().load(HOME_ROOM_MODEL.tex));
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.flipY = false;      // convención glTF
+    tex.anisotropy = 8;
+    const mat = own(new THREE.MeshLambertMaterial({ map: tex, side: THREE.DoubleSide }));
+    const g = new THREE.Group();
+    homeRoomRaw.forEach(m => {
+      const geo = own(new THREE.BufferGeometry());
+      geo.setAttribute("position", new THREE.BufferAttribute(m.pos, 3));
+      if (m.nor) geo.setAttribute("normal", new THREE.BufferAttribute(m.nor, 3));
+      else geo.computeVertexNormals();
+      if (m.uv) geo.setAttribute("uv", new THREE.BufferAttribute(m.uv, 2));
+      if (m.idx) geo.setIndex(new THREE.BufferAttribute(m.idx, 1));
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.castShadow = mesh.receiveShadow = true;
+      g.add(mesh);
+    });
+    // el modelo viene desplazado del origen: se recentra por su caja
+    const bb = HOME_ROOM_MODEL.bbox;
+    const inner = new THREE.Group();
+    inner.position.set(-(bb.min[0]+bb.max[0])/2, -bb.min[1], -(bb.min[2]+bb.max[2])/2);
+    inner.add(g);
+    const outer = new THREE.Group();
+    outer.add(inner);
+    outer.scale.set(HOME_ROOM.scale, HOME_ROOM.scale*HOME_ROOM.squash, HOME_ROOM.scale);
+    outer.rotation.y = HOME_ROOM.rotY;
+    // se baja el modelo hasta que su tarima quede justo en y=0, que es donde
+    // caminan el jugador y el gato
+    outer.position.set(HOME_ROOM.x, -HOME_ROOM.floor*HOME_ROOM.scale*HOME_ROOM.squash, HOME_ROOM.z);
+    worldGroup.add(outer);
 
-    // índices de ENV_PROPS.objects por categoría (ver test-shots/props2_sheet_*.png)
-    const TRUNKS   = [1];              // tronco grande curvo
-    const CANOPIES = [19, 20, 22];     // copas grandes
-    const BUSHES   = [16, 17, 18, 21, 23, 24];
-    const BOULDERS = [5, 6, 7, 10, 11, 12, 28, 29, 30, 32]; // rocas musgosas
-    const CRAGS    = [3, 4, 13, 15, 25];                    // riscos grises altos
-    const DARKCRAG = [54, 55, 56, 57, 58, 59, 60, 61];      // riscos oscuros
-    const LOGS     = [0, 2, 8, 9, 14, 26, 27, 37];          // troncos y ramas caídas
-    const STONES   = [42, 43, 44, 45, 46, 47, 48, 49, 50, 51]; // piedras planas
-    const PEBBLES  = [63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81];
-    const DRIFT    = [38, 39, 52, 53, 88, 89, 90, 91, 92, 93, 96, 100, 101]; // madera a la deriva
-
-    const pick = (arr, h, shift=0) => arr[(h >> shift) % arr.length];
-    const put = (i, x, y, s, h, shadow=false) => {
-      const m = new THREE.Mesh(getGeo(i), propMat);
-      m.position.set(x+0.5, 0, y+0.5);
-      m.rotation.y = (h % 628) / 100;
-      m.scale.set(s, s, s);
-      if (shadow) m.castShadow = true;
-      worldGroup.add(m);
-      envPropsCount++;
-      return m;
-    };
-
-    const npcAt = new Set(npcsCur.map(n => n.x + "," + n.y));
-    const free = (x, y) => ground[y] && !solid[y][x] && !decor[y][x] && !meta[y][x] && !npcAt.has(x + "," + y);
-    envPropsCount = 0;
-    for (let y=3; y<MH-2; y++) for (let x=3; x<MW-2; x++){
-      if (!free(x, y)) continue;
-      const tile = ground[y][x];
-      const h = hsh(x*5+11, y*7+3) % 1000;
-      if (tile === "grass"){
-        if (h < 6){ // árbol: tronco + copa
-          const s = 1.1 + ((h>>3)%50)/100;
-          const t = put(TRUNKS[h % TRUNKS.length], x, y, s, h, true);
-          const c = put(pick(CANOPIES, h, 4), x, y, s*1.1, h, true);
-          c.position.y = s * 1.51 * 0.92; // copa a la altura del tronco
-        }
-        else if (h < 20) put(pick(BUSHES, h), x, y, 1.1 + ((h>>3)%70)/100, h);
-        else if (h < 30) put(pick(BOULDERS, h), x, y, 0.9 + ((h>>3)%70)/100, h, true);
-        else if (h < 36) put(pick(LOGS, h), x, y, 1.3 + ((h>>3)%70)/100, h);
-        else if (h < 46) put(pick(STONES, h), x, y, 1.5 + ((h>>3)%100)/100, h);
-        else if (h < 56) put(pick(PEBBLES, h), x, y, 1.6 + ((h>>3)%100)/100, h);
-      } else if (tile === "sand"){
-        if (h < 14) put(pick(BOULDERS, h), x, y, 0.9 + ((h>>3)%70)/100, h, true);
-        else if (h < 24) put(pick(CRAGS, h), x, y, 0.8 + ((h>>3)%70)/100, h, true);
-        else if (h < 32) put(pick(DARKCRAG, h), x, y, 1.0 + ((h>>3)%80)/100, h, true);
-        else if (h < 46) put(pick(DRIFT, h), x, y, 1.2 + ((h>>3)%60)/100, h);
-        else if (h < 60) put(pick(PEBBLES, h), x, y, 1.6 + ((h>>3)%100)/100, h);
-      }
-    }
+    // felpudo de salida: el suelo horneado queda tapado por el modelo, así que
+    // la marca de la puerta se dibuja como una placa propia sobre la tarima
+    const mtex = own(Paper.canvasTex(Paper.exitMatTexture()));
+    const mmat = own(new THREE.MeshBasicMaterial({ map: mtex, transparent: true, depthWrite: false }));
+    const matMesh = new THREE.Mesh(Paper.geo("charPlane", () => new THREE.PlaneGeometry(1, 1)), mmat);
+    matMesh.rotation.x = -Math.PI/2;
+    matMesh.position.set(HOME_EXIT[0]+0.5, 0.03, HOME_EXIT[1]+0.5);
+    worldGroup.add(matMesh);
+    return true;
   }
+
+  /* ---------- casas de verdad (cabaña del asset casa.fbx) ----------
+     El modelo de la casa en el mar trae, además de la isla y el muelle, una
+     cabaña completa (muros de estuco, tejas, vigas y ventanas). Las mallas
+     3..51 son justo el edificio: se fusionan por color, se orientan con la
+     fachada al sur y se reutilizan para todos los edificios del juego,
+     recoloreando muros y tejado según el tipo. */
+  const HOUSE_MESH_RANGE = [3, 51];
+  const HOUSE_TARGET_W = 4.5;      // ancho en tiles (la base sólida mide 6)
+  let houseGeoCache = null;        // { color: BufferGeometry } ya orientadas
+  let houseHeight = 0;             // altura resultante, para colocar el cartel
+
+  // fusiona varias mallas (pos/nor/idx) en una sola geometría
+  function mergeParts(parts){
+    let nv = 0, ni = 0;
+    parts.forEach(p => { nv += p.pos.length/3; ni += p.idx ? p.idx.length : p.pos.length/3; });
+    const pos = new Float32Array(nv*3), nor = new Float32Array(nv*3);
+    const idx = new Uint32Array(ni);
+    let vo = 0, io = 0;
+    parts.forEach(p => {
+      pos.set(p.pos, vo*3);
+      if (p.nor) nor.set(p.nor, vo*3);
+      const n = p.pos.length/3;
+      if (p.idx) for (let k=0; k<p.idx.length; k++) idx[io++] = p.idx[k] + vo;
+      else for (let k=0; k<n; k++) idx[io++] = k + vo;
+      vo += n;
+    });
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    g.setAttribute("normal", new THREE.BufferAttribute(nor, 3));
+    g.setIndex(new THREE.BufferAttribute(idx, 1));
+    return g;
+  }
+
+  function houseGeos(){
+    if (houseGeoCache) return houseGeoCache;
+    if (typeof SEA_HOUSE_MODEL === "undefined") return (houseGeoCache = {});
+    if (!seaHouseRaw){
+      seaHouseRaw = SEA_HOUSE_MODEL.meshes.map(m => ({
+        pos: b64ToF32(m.pos), nor: m.nor ? b64ToF32(m.nor) : null,
+        idx: m.idx ? b64ToU32(m.idx) : null, color: m.color,
+      }));
+    }
+    const parts = seaHouseRaw.slice(HOUSE_MESH_RANGE[0], HOUSE_MESH_RANGE[1] + 1);
+    // caja envolvente del edificio en coordenadas del asset
+    const mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
+    parts.forEach(p => {
+      for (let k=0; k<p.pos.length; k+=3) for (let a=0; a<3; a++){
+        const v = p.pos[k+a];
+        if (v < mn[a]) mn[a] = v;
+        if (v > mx[a]) mx[a] = v;
+      }
+    });
+    // la fachada del asset mira a +X; al girar -90° pasa a mirar al sur (+Z),
+    // así que el ancho visible del edificio es su profundidad original.
+    const s = HOUSE_TARGET_W / (mx[2] - mn[2]);
+    houseHeight = (mx[1] - mn[1]) * s;
+    const T = new THREE.Matrix4().makeTranslation(-(mn[0]+mx[0])/2, -mn[1], -(mn[2]+mx[2])/2);
+    const R = new THREE.Matrix4().makeRotationY(-Math.PI/2);
+    const S = new THREE.Matrix4().makeScale(s, s, s);
+    const M = new THREE.Matrix4().multiplyMatrices(S, new THREE.Matrix4().multiplyMatrices(R, T));
+    const byColor = {};
+    parts.forEach(p => (byColor[p.color] = byColor[p.color] || []).push(p));
+    houseGeoCache = {};
+    Object.keys(byColor).forEach(col => {
+      const g = mergeParts(byColor[col]);
+      g.applyMatrix4(M);
+      houseGeoCache[col] = g;
+    });
+    return houseGeoCache;
+  }
+
+  // recoloreado por tipo de edificio: muros, tejas (dos tonos) y madera
+  const HOUSE_SKINS = {
+    blue:   { "#f5efe2":"#fbf5e8", "#c96f35":"#3f6fb5", "#e8894a":"#5c8fd6", "#9c7443":"#7d5f3e" },
+    warm:   { "#f5efe2":"#fff4de", "#c96f35":"#d4732f", "#e8894a":"#f0a057", "#9c7443":"#9c7443" },
+    cold:   { "#f5efe2":"#eef1f8", "#c96f35":"#5f6fa8", "#e8894a":"#8391c6", "#9c7443":"#7a6a55" },
+    rose:   { "#f5efe2":"#fff0f2", "#c96f35":"#c9455a", "#e8894a":"#e8697f", "#9c7443":"#8f6350" },
+    green:  { "#f5efe2":"#f4f8e6", "#c96f35":"#3f8f52", "#e8894a":"#63b273", "#9c7443":"#7d6a45" },
+    purple: { "#f5efe2":"#f6f0fb", "#c96f35":"#7b5bb5", "#e8894a":"#9d80d0", "#9c7443":"#7a6a7d" },
+  };
+  // cada edificio con carácter propio, como los pueblos de Pokémon
+  const HOUSE_SKIN_BY_TAG = {
+    shop:"green", alcaldia:"purple", casa:"rose", cafe:"warm",
+    academia:"blue", norebang:"rose",
+  };
+
+  function buildHouseMesh(variant, d){
+    const geos = houseGeos();
+    const keys = Object.keys(geos);
+    if (!keys.length) return Paper.house(variant); // sin el asset: casa de papel
+    let skinKey = variant;
+    Object.keys(HOUSE_SKIN_BY_TAG).forEach(tag => { if (d && d[tag]) skinKey = HOUSE_SKIN_BY_TAG[tag]; });
+    if (d && d.gym) skinKey = ["blue","warm","cold","green","purple","rose"][(d.gym.length*7) % 6];
+    const skin = HOUSE_SKINS[skinKey] || HOUSE_SKINS.blue;
+    const g = new THREE.Group();
+    keys.forEach(col => {
+      const mesh = new THREE.Mesh(geos[col], own(new THREE.MeshLambertMaterial({
+        color: skin[col] || col, side: THREE.DoubleSide,
+      })));
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      g.add(mesh);
+    });
+    return g;
+  }
+
 
   // ---------- jardín-isla StylisedEnv (js/envGarden.js) ----------
   // Diorama completo del pack (estanque, árboles, helechos, flores, puente,
@@ -2026,8 +2772,13 @@ const World = (() => {
     const w = ENV_GARDEN_MODEL.bbox.max[0] - ENV_GARDEN_MODEL.bbox.min[0];
     const s = 9 / w;
     g.scale.set(s, s, s);
-    // en el mar al oeste del muelle, ligeramente hundida para emerger del agua
-    g.position.set(13.5, -0.4, 66);
+    /* En el mar al oeste del muelle. El diorama es una peana de roca con el
+       césped arriba (a y≈1.87 del modelo): si se apoya en la superficie se ve
+       el pedrusco entero al aire y parece flotar, así que se hunde hasta dejar
+       la orilla apenas medio tile sobre el agua, como una isla de verdad. */
+    const GRASS_Y = 1.87;   // nivel del césped en el modelo
+    const SHORE_OVER_SEA = 0.55; // cuánto asoma la orilla
+    g.position.set(13.5, SHORE_OVER_SEA - GRASS_Y*s, 66);
     g.rotation.y = Math.PI*0.15;
     worldGroup.add(g);
     gardenCount = g.children.length;
@@ -2039,20 +2790,30 @@ const World = (() => {
     casa:"#f7ecd8", alcaldia:"#eadcf7", interior:"#f7e8c0",
   };
   function applyModeAmbience(){
-    camOffset = Math.max(MW, MH) <= 26
-      ? new THREE.Vector3(0, 9.5, 7.6)
-      : new THREE.Vector3(0, 16.5, 12.2);
+    camOffset = mode === "casa"
+      // el cuarto de Karol es pequeño pero de muros altos: la cámara se aleja
+      // y se descentra para que quepa entero sin recortar la cama
+      ? new THREE.Vector3(1.1, 12.5, 10.2)
+      : Math.max(MW, MH) <= 26
+        ? new THREE.Vector3(0, 9.5, 7.6)
+        : new THREE.Vector3(0, 16.5, 12.2);
+    if (skyDome) skyDome.visible = (mode === "over" || mode === "pueblo");
     if (mode === "cueva"){
       scene.background = new THREE.Color("#17131f");
-      scene.fog = null;
-      hemi.color.set("#4a4468"); hemi.groundColor.set("#1a1626"); hemi.intensity = 0.6;
-      sun.intensity = 0.15;
-      caveLight.intensity = 1.6;
+      scene.fog = new THREE.Fog(0x17131f, 14, 40);
+      hemi.color.set("#6f6699"); hemi.groundColor.set("#2a2438"); hemi.intensity = 0.95;
+      sun.intensity = 0.35;
+      caveLight.intensity = 2.1;
+      caveLight.distance = 14;
     } else if (mode === "over" || mode === "pueblo"){
-      scene.background = new THREE.Color("#8ed8ff");
-      scene.fog = new THREE.Fog(0x8ed8ff, 55, 130);
-      hemi.color.set("#bfe8ff"); hemi.groundColor.set("#8a9a5b"); hemi.intensity = 0.95;
-      sun.intensity = 1.05;
+      scene.background = new THREE.Color(SKY_HORIZON);
+      // el pueblo es un mapa pequeño: la niebla entra antes para que el
+      // faldón del horizonte no se vea como una alfombra verde plana
+      scene.fog = mode === "pueblo"
+        ? new THREE.Fog(new THREE.Color(SKY_HORIZON).getHex(), 22, 52)
+        : new THREE.Fog(new THREE.Color(SKY_HORIZON).getHex(), 42, 105);
+      hemi.color.set("#d2efff"); hemi.groundColor.set("#7ba85c"); hemi.intensity = 0.85;
+      sun.intensity = 1.25;
       caveLight.intensity = 0;
     } else {
       scene.background = new THREE.Color(INTERIOR_BG[mode] || "#f2e6d0");
@@ -2066,27 +2827,31 @@ const World = (() => {
   // ---------- escena completa ----------
   function buildScene(){
     sceneDirty = false;
+    // profundidad y silueta del mar son propias de cada mapa
+    depthField = null; seaMaskCanvas = null; seaColorCanvas = null;
     disposeScene();
     worldGroup = new THREE.Group();
     scene.add(worldGroup);
     applyModeAmbience();
-    buildGroundMesh();
+    buildHeightMap(); // antes que nada: todo lo demás se apoya en el relieve
+    if (mode !== "casa") buildGroundMesh(); // en casa el suelo lo pone el modelo
     buildWaterMesh();
     scanAndBuildDecor();
-    buildInteriorWalls();
+    // el cuarto de Karol es un modelo entero: trae su propio suelo y muros
+    if (!buildHomeRoom()) buildInteriorWalls();
     buildCharacters();
     buildAmbient();
     buildSeaHouse();
-    buildEnvAssets();
     buildGarden();
     snapCamera();
   }
 
   function snapCamera(){
     const tx = player.px/TILE + 0.5, tz = player.py/TILE + 0.5;
-    desired.set(tx + camOffset.x, camOffset.y, tz + camOffset.z);
+    const gy = terrainY(tx, tz); // la cámara sube y baja con la loma
+    desired.set(tx + camOffset.x, gy + camOffset.y, tz + camOffset.z);
     camera.position.copy(desired);
-    lookCur.set(tx, 0.9, tz);
+    lookCur.set(tx, gy + 0.9, tz);
     camera.lookAt(lookCur);
     sun.position.set(tx+16, 26, tz+11);
     sun.target.position.set(tx, 0, tz);
@@ -2109,7 +2874,7 @@ const World = (() => {
         pv.skin = skin;
       }
       const gx = player.px/TILE + 0.5, gz = player.py/TILE + 0.5;
-      pv.group.position.set(gx, 0, gz);
+      pv.group.position.set(gx, terrainY(gx, gz), gz);
       const hop = player.moving ? Math.abs(Math.sin(player.animT*0.5))*0.09 : 0;
       pv.plane.position.y = pv.plane.scale.y/2 + hop;
       pv.mat.map = pv.karolTex
@@ -2126,7 +2891,7 @@ const World = (() => {
       const vis = npcVis.get(n);
       if (!vis) return;
       const gx = n.px/TILE + 0.5, gz = n.py/TILE + 0.5;
-      vis.group.position.set(gx, 0, gz);
+      vis.group.position.set(gx, terrainY(gx, gz), gz);
       const hop = n.moving ? Math.abs(Math.sin(n.animT*0.5))*0.07 : 0;
       vis.plane.position.y = 0.6 + hop;
       if (n.dir === 1) vis.flipT = Math.PI;
@@ -2142,7 +2907,7 @@ const World = (() => {
     if (!pet && petVis){ worldGroup.remove(petVis.group); petVis = null; }
     if (petVis && pet){
       const gx = pet.px/TILE + 0.5, gz = pet.py/TILE + 0.5;
-      petVis.group.position.set(gx, 0, gz);
+      petVis.group.position.set(gx, terrainY(gx, gz), gz);
       petVis.plane.position.y = 0.32 + (pet.moving ? Math.abs(Math.sin(pet.bob*0.3))*0.14 : Math.sin(now*0.004)*0.02);
       petVis.plane.rotation.y = Math.atan2(camX - gx, camZ - gz);
     }
@@ -2178,7 +2943,7 @@ const World = (() => {
     butterflyVis.forEach((vo, i) => {
       const b = vo.b;
       const gx = b.px/TILE + 0.5, gz = b.py/TILE + 0.5;
-      vo.group.position.set(gx, 1.15 + Math.sin(b.t*0.1)*0.15, gz);
+      vo.group.position.set(gx, terrainY(gx, gz) + 1.15 + Math.sin(b.t*0.1)*0.15, gz);
       vo.group.rotation.y = Math.atan2(camX - gx, camZ - gz);
       const f = Math.sin(now*0.022 + i*1.7)*0.75;
       const wings = vo.group.userData.wings;
@@ -2189,7 +2954,7 @@ const World = (() => {
     animalVis.forEach(vo => {
       const a = vo.a;
       const gx = a.px/TILE + 0.5, gz = a.py/TILE + 0.5;
-      vo.group.position.set(gx, 0, gz);
+      vo.group.position.set(gx, terrainY(gx, gz), gz);
       vo.plane.position.y = 0.4 + (a.moving ? Math.abs(Math.sin(a.t*0.3))*0.05 : 0);
       vo.plane.rotation.y = Math.atan2(camX - gx, camZ - gz);
       vo.plane.scale.x = (a.facing === 1 ? 1 : -1) * 0.95;
@@ -2201,19 +2966,22 @@ const World = (() => {
       if (c.sp.position.x > MW + 8) c.sp.position.x = -8;
     });
 
+    // la cúpula del cielo viaja con la cámara: nunca se alcanza el horizonte
+    if (skyDome && skyDome.visible) skyDome.position.copy(camera.position);
     // luz de cueva sigue al jugador
     const tx = player.px/TILE + 0.5, tz = player.py/TILE + 0.5;
-    caveLight.position.set(tx, 1.9, tz);
+    caveLight.position.set(tx, terrainY(tx, tz) + 1.9, tz);
 
     // sol y sombras siguen al jugador
     sun.position.set(tx+16, 26, tz+11);
     sun.target.position.set(tx, 0, tz);
     sun.target.updateMatrixWorld();
 
-    // cámara
-    desired.set(tx + camOffset.x, camOffset.y, tz + camOffset.z);
+    // cámara (acompaña la altura del terreno bajo el jugador)
+    const camGy = terrainY(tx, tz);
+    desired.set(tx + camOffset.x, camGy + camOffset.y, tz + camOffset.z);
     camera.position.lerp(desired, Math.min(1, dt*0.008));
-    lookTgt.set(tx, 0.9, tz);
+    lookTgt.set(tx, camGy + 0.9, tz);
     lookCur.lerp(lookTgt, Math.min(1, dt*0.012));
     camera.lookAt(lookCur);
   }
@@ -2258,16 +3026,18 @@ const World = (() => {
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     scene = new THREE.Scene();
     camera = new THREE.PerspectiveCamera(40, 1, 0.1, 300);
-    hemi = new THREE.HemisphereLight(0xbfe8ff, 0x8a9a5b, 0.95);
-    sun = new THREE.DirectionalLight(0xfff2d8, 1.05);
+    hemi = new THREE.HemisphereLight(0xd2efff, 0x7ba85c, 0.85);
+    sun = new THREE.DirectionalLight(0xfff4dd, 1.25);
     sun.castShadow = true;
-    sun.shadow.mapSize.set(1024, 1024);
-    sun.shadow.camera.left = -22; sun.shadow.camera.right = 22;
-    sun.shadow.camera.top = 22; sun.shadow.camera.bottom = -22;
+    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.camera.left = -24; sun.shadow.camera.right = 24;
+    sun.shadow.camera.top = 24; sun.shadow.camera.bottom = -24;
     sun.shadow.camera.near = 1; sun.shadow.camera.far = 90;
-    sun.shadow.bias = -0.002;
+    sun.shadow.bias = -0.0015;
+    sun.shadow.normalBias = 0.02;
     caveLight = new THREE.PointLight(0xffd9a0, 0, 9, 1.2);
-    scene.add(hemi, sun, sun.target, caveLight);
+    skyDome = buildSkyDome();
+    scene.add(hemi, sun, sun.target, caveLight, skyDome);
     ready = true;
   }
 
@@ -2329,7 +3099,8 @@ const World = (() => {
       player: { x:player.x, y:player.y, moving:player.moving, dir:player.dir },
       keys: Object.keys(keys).filter(k=>keys[k]),
       ready, started, dialogOpen: Dialog.open,
-      envAssets: envAssetsCount, gardenMeshes: gardenCount,
+      props3d: envPropsCount, batches: envAssetsCount, gardenMeshes: gardenCount,
+      relief: heightMap ? +Math.max.apply(null, Array.from(heightMap)).toFixed(2) : 0,
       npcs: npcsCur.map(n=>({name:n.name.split(" ")[0], x:n.x, y:n.y, moving:n.moving})),
     };
   }

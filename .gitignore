@@ -1,0 +1,10 @@
+# Exportaciones intermedias de Blender: las texturas PBR pesan 110 MB y no se
+# usan (el juego solo carga js/homeRoom.js, que ya lleva el color base a 1024).
+assets/rooms_gltf/
+
+# El .blend original pesa 115 MB y GitHub rechaza los archivos de más de 100 MB.
+# La habitación ya va horneada en js/homeRoom.js; para volver a exportarla hay
+# que tener este .blend en local (ver README).
+assets/uploads_files_6978800_free+isometric+rooms/
+
+tools/node_modules/

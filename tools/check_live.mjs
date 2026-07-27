@@ -1,0 +1,20 @@
+// Comprueba qué hace la versión publicada en GitHub Pages.
+import puppeteer from "puppeteer";
+const URL = process.argv[2] || "https://hernanfernandez1.github.io/pokoreano3d/";
+const b = await puppeteer.launch({ headless: "new" });
+const p = await b.newPage();
+await p.setViewport({ width: 1280, height: 800 });
+p.on("dialog", d => d.accept());
+const errs = [];
+p.on("pageerror", e => errs.push("pageerror: " + e.message));
+p.on("console", m => { if (m.type() === "error") errs.push("console: " + m.text()); });
+p.on("requestfailed", r => errs.push("404/red: " + r.url()));
+const t0 = Date.now();
+await p.goto(URL, { waitUntil: "load", timeout: 120000 });
+console.log("carga:", ((Date.now()-t0)/1000).toFixed(1) + "s");
+await p.click('[data-action="new-game"]');
+await new Promise(r => setTimeout(r, 6000));
+console.log("pantalla activa:", await p.evaluate(() => document.querySelector(".screen.active")?.id));
+console.log("World.debug():", await p.evaluate(() => { try { return JSON.stringify(World.debug()).slice(0,120); } catch(e){ return "ERROR " + e.message; } }));
+console.log("errores:", errs.length ? errs.slice(0,6) : "ninguno");
+await b.close();

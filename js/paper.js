@@ -414,11 +414,20 @@ const Paper = (() => {
     const key = "T" + color;
     return mat(key, () => new THREE.MeshToonMaterial({ color }));
   }
-  function canvasTex(c, { nearest = false } = {}){
+  function canvasTex(c, { nearest = false, sharp = false } = {}){
     const t = new THREE.CanvasTexture(c);
     if (nearest){ t.magFilter = THREE.NearestFilter; }
     t.colorSpace = THREE.SRGBColorSpace;
-    t.anisotropy = 8; // menos borroso al minificar en ángulo (sprites papel)
+    t.anisotropy = 16; // menos borroso al minificar en ángulo (sprites papel)
+    if (sharp){
+      // Los personajes se ven en pantalla algo más pequeños que su textura, y
+      // con mipmaps el filtro se llevaba el detalle: sin mipmaps se muestrea
+      // siempre el nivel completo y el sprite queda nítido.
+      t.generateMipmaps = false;
+      t.minFilter = THREE.LinearFilter;
+      t.magFilter = nearest ? THREE.NearestFilter : THREE.LinearFilter;
+      t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
+    }
     return t;
   }
 
