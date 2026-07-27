@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Pokoreano — Aprende coreano al estilo Pokémon</title>
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="icon" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' fill='%23e63946'/><circle cx='8' cy='8' r='3' fill='%23fff'/></svg>" />
+</head>
+<body>
+  <div id="app">
+    <!-- Title screen -->
+    <section id="screen-title" class="screen active">
+      <div class="title-wrap">
+        <div class="pokoreano-logo">
+          <span class="k1">포</span><span class="k2">코</span><span class="k3">레</span><span class="k4">아</span><span class="k5">노</span>
+        </div>
+        <h1>POKOREANO</h1>
+        <p class="tag">Atrapa palabras. Gana medallas. Domina el 한국어.</p>
+        <div class="menu">
+          <button class="btn primary" data-action="new-game">Nuevo juego</button>
+          <button class="btn" data-action="continue">Continuar</button>
+          <button class="btn" data-action="import">Importar vocab (CSV)</button>
+        </div>
+        <div class="credits">한글 · v2.0 — ahora en 3D estilo papel 📄✨</div>
+      </div>
+    </section>
+
+    <!-- Overworld map -->
+    <section id="screen-map" class="screen">
+      <header class="topbar">
+        <div class="player-chip"><span id="player-avatar" class="avatar-mini"></span><span id="player-name">Karol</span></div>
+        <div class="stats">
+          <span>⭐ Nv.<b id="stat-level">1</b></span>
+          <span>🏅 <b id="stat-badges">0</b>/8</span>
+          <span>📖 <b id="stat-vocab">0</b></span>
+          <span>🐾 <b id="stat-guardians">0</b>/12</span>
+          <span>💰 <b id="stat-coins">0</b></span>
+        </div>
+        <div class="topbar-actions">
+          <button class="btn small" data-action="dex">Vocabudex</button>
+          <button class="btn small" data-action="guardians">Guardianes</button>
+          <button class="btn small" data-action="bag">Mochila</button>
+          <button class="btn small" data-action="mute" id="mute-btn">🔊</button>
+          <button class="btn small" data-action="cheats">🧪</button>
+          <button class="btn small" data-action="save">Guardar</button>
+        </div>
+      </header>
+      <div class="map-canvas" id="map-wrap">
+        <canvas id="world-canvas"></canvas>
+        <div id="quest-banner" class="quest-banner"></div>
+        <div id="dialog" class="dialog" hidden>
+          <div class="dlg-name"></div>
+          <div class="dlg-ko"></div>
+          <div class="dlg-rom"></div>
+          <div class="dlg-es"></div>
+          <div class="dlg-more">▼</div>
+        </div>
+        <div id="dpad" class="dpad">
+          <button class="dpad-btn up" data-pad="up">▲</button>
+          <button class="dpad-btn left" data-pad="left">◀</button>
+          <button class="dpad-btn right" data-pad="right">▶</button>
+          <button class="dpad-btn down" data-pad="down">▼</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Battle / encounter -->
+    <section id="screen-battle" class="screen">
+      <div class="battle-scene">
+        <div class="enemy-side">
+          <div class="enemy-sprite" id="enemy-sprite"></div>
+          <div class="hpbar"><div id="enemy-hp" class="hpfill"></div></div>
+          <div class="label" id="enemy-name">???</div>
+        </div>
+        <div class="player-side">
+          <div class="player-sprite" id="battle-player-sprite"></div>
+          <div class="hpbar"><div id="player-hp" class="hpfill"></div></div>
+          <div class="label"><span id="battle-player-name">Karol</span> · Racha <span id="combo">0</span>x</div>
+        </div>
+      </div>
+      <div class="battle-box">
+        <div id="battle-question" class="question">…</div>
+        <div id="battle-options" class="options"></div>
+        <div id="battle-feedback" class="feedback"></div>
+      </div>
+    </section>
+
+    <!-- Gym exam -->
+    <section id="screen-gym" class="screen">
+      <header class="topbar">
+        <div class="gym-title" id="gym-title">Gimnasio</div>
+        <div class="gym-progress">Pregunta <b id="gym-idx">1</b>/<b id="gym-total">10</b> · Aciertos <b id="gym-hits">0</b></div>
+        <button class="btn small danger" data-action="quit-gym">Rendirse</button>
+      </header>
+      <div class="gym-body">
+        <div class="leader-sprite" id="leader-sprite"></div>
+        <div class="gym-abilities" id="gym-abilities"></div>
+        <div class="gym-question" id="gym-question">…</div>
+        <div class="gym-options" id="gym-options"></div>
+        <div class="gym-feedback" id="gym-feedback"></div>
+      </div>
+    </section>
+
+    <!-- Crate opening -->
+    <section id="screen-crate" class="screen">
+      <div class="crate-stage">
+        <div class="crate-box" id="crate-box">
+          <div class="crate-lid"></div>
+          <div class="crate-base"></div>
+          <div class="crate-glow" id="crate-glow"></div>
+        </div>
+        <div class="crate-reel" id="crate-reel"></div>
+        <div class="crate-result" id="crate-result"></div>
+        <div class="crate-actions">
+          <button class="btn primary big" id="crate-open-btn">Abrir caja</button>
+          <button class="btn" id="crate-continue-btn" hidden>Continuar</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Vocabudex -->
+    <section id="screen-dex" class="screen">
+      <header class="topbar">
+        <div>Vocabudex</div>
+        <input id="dex-search" class="input" placeholder="Buscar…" />
+        <button class="btn small" data-action="close-modal">Volver</button>
+      </header>
+      <div class="dex-grid" id="dex-grid"></div>
+    </section>
+
+    <!-- CSV Importer -->
+    <section id="screen-import" class="screen">
+      <header class="topbar">
+        <div>Importar vocab desde tu libro</div>
+        <button class="btn small" data-action="close-modal">Volver</button>
+      </header>
+      <div class="import-body">
+        <p>Pega tu vocabulario en formato: <code>coreano,romanizacion,español</code> (una fila por línea).</p>
+        <textarea id="import-text" placeholder="안녕,annyeong,hola&#10;고양이,goyangi,gato&#10;..." rows="14"></textarea>
+        <div class="row">
+          <button class="btn primary" data-action="do-import">Importar</button>
+          <span id="import-status"></span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Captura de guardián -->
+    <section id="screen-capture" class="screen">
+      <div class="capture-stage">
+        <div class="capture-head">
+          <div class="capture-sprite" id="capture-sprite"></div>
+          <div>
+            <div class="capture-rarity" id="capture-rarity">RARO</div>
+            <h2 id="capture-name">호랑이</h2>
+            <div class="capture-sub" id="capture-sub">horangi · Tigre guardián</div>
+          </div>
+        </div>
+        <div class="capture-balls" id="capture-balls"></div>
+        <div class="capture-msg" id="capture-msg">¡Responde sin fallar para capturarlo!</div>
+        <div class="battle-box">
+          <div id="capture-question" class="question">…</div>
+          <div id="capture-options" class="options"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Guardianes (colección + equipo) -->
+    <section id="screen-guardians" class="screen">
+      <header class="topbar">
+        <div>수호신 Guardianes</div>
+        <div class="team-bar" id="team-bar"></div>
+        <button class="btn small" data-action="close-modal">Volver</button>
+      </header>
+      <div class="guardians-grid" id="guardians-grid"></div>
+    </section>
+
+    <!-- Tienda -->
+    <section id="screen-shop" class="screen">
+      <header class="topbar">
+        <div>상점 Tienda</div>
+        <div class="stats"><span>💰 <b id="shop-coins">0</b></span></div>
+        <button class="btn small" data-action="close-modal">Volver</button>
+      </header>
+      <div class="shop-grid" id="shop-grid"></div>
+    </section>
+
+    <!-- Mochila -->
+    <section id="screen-bag" class="screen">
+      <header class="topbar">
+        <div>가방 Mochila</div>
+        <button class="btn small" data-action="close-modal">Volver</button>
+      </header>
+      <div class="bag-body" id="bag-body"></div>
+    </section>
+
+    <!-- Trucos (modo prueba) -->
+    <section id="screen-cheats" class="screen">
+      <header class="topbar">
+        <div>🧪 Trucos (modo prueba)</div>
+        <button class="btn small" data-action="close-modal">Volver</button>
+      </header>
+      <div class="cheats-body">
+        <button class="btn primary" data-cheat="coins">💰 +1000 monedas</button>
+        <button class="btn primary" data-cheat="megacoins">💎 99.999 monedas</button>
+        <button class="btn" data-cheat="badges">🏅 Todas las medallas</button>
+        <button class="btn" data-cheat="guardians">🐾 Todos los guardianes</button>
+        <button class="btn" data-cheat="skins">👕 Todas las skins</button>
+        <button class="btn" data-cheat="pets">🐶 Todas las mascotas</button>
+        <button class="btn danger" data-cheat="reset">🗑 Borrar partida</button>
+      </div>
+    </section>
+
+    <!-- Toast -->
+    <div id="toast" class="toast"></div>
+  </div>
+
+  <script src="lib/three.min.js"></script>
+  <script src="js/data.js"></script>
+  <script src="js/creatures.js"></script>
+  <script src="js/sprites.js"></script>
+  <script src="js/karol.js"></script>
+  <script src="js/state.js"></script>
+  <script src="js/quests.js"></script>
+  <script src="js/sfx.js"></script>
+  <script src="js/speech.js"></script>
+  <script src="js/paper.js"></script>
+  <script src="js/seaHouse.js"></script>
+  <script src="js/envAssets.js"></script>
+  <script src="js/envGarden.js"></script>
+  <script src="js/envGroundTex.js"></script>
+  <script src="js/engine.js"></script>
+  <script src="js/world.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>

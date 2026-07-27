@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch(domain:opengameart.org)",
+      "Bash(mkdir -p \"C:/Users/herna/Desktop/pokoreano/assets\")",
+      "Bash(curl -sL -o gfx.zip \"https://opengameart.org/sites/default/files/gfx_3.zip\")",
+      "Bash(unzip -o -q gfx.zip)",
+      "Bash(rm gfx.zip)",
+      "PowerShell(Add-Type -AssemblyName System.Drawing; $i=[System.Drawing.Bitmap]::FromFile\\(\"C:\\\\Users\\\\herna\\\\Desktop\\\\pokoreano\\\\assets\\\\gfx\\\\NPC_test.png\"\\); \"$\\($i.Width\\)x$\\($i.Height\\)\"; $i.Dispose\\(\\))",
+      "mcp__Claude_Browser__preview_start",
+      "PowerShell(Get-ChildItem \"C:\\\\Users\\\\herna\\\\Downloads\\\\Cute_Fantasy_Free\" -Recurse -File | Select-Object @{n=\"Ruta\";e={$_.FullName.Replace\\(\"C:\\\\Users\\\\herna\\\\Downloads\\\\Cute_Fantasy_Free\\\\\",\"\"\\)}}, Length | Format-Table -AutoSize | Out-String -Width 250)"
+    ]
+  }
+}
