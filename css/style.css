@@ -181,28 +181,64 @@ textarea.input, #import-text{
 }
 .topbar-actions{display:flex;gap:8px;flex-wrap:wrap}
 
+/* ===== Barra superior en móvil =====
+   Con el ancho de un teléfono, la barra se partía en cuatro filas y se
+   comía media pantalla, justo donde hace falta ver el mapa. Aquí se
+   compacta a una sola fila que se desliza en horizontal. */
+@media (max-width:640px){
+  .topbar{
+    gap:6px;padding:5px 8px;flex-wrap:nowrap;
+    overflow-x:auto;overflow-y:hidden;
+    scrollbar-width:none;-webkit-overflow-scrolling:touch;
+  }
+  .topbar::-webkit-scrollbar{display:none}
+  .topbar > *{flex:0 0 auto}
+  .player-chip{padding:2px 8px 2px 3px;font-size:12px;gap:5px}
+  .avatar-mini{width:22px;height:22px;border-width:2px}
+  .avatar-mini svg{width:19px;height:19px}
+  .stats{gap:5px;flex-wrap:nowrap}
+  .stats .stat{padding:2px 8px;font-size:11px;border-width:2px;box-shadow:0 2px 0 rgba(51,49,78,.2)}
+  .xpbar{width:96px;height:9px}
+  #xp-text{font-size:7px;line-height:7px}
+  .topbar-actions{gap:5px;flex-wrap:nowrap}
+  .topbar-actions .btn{padding:5px 9px;font-size:11px;border-width:2px}
+}
+
 /* ===================== MAP ===================== */
 #screen-map{background:linear-gradient(180deg,var(--sky1),var(--sky2))}
 .map-canvas{flex:1;position:relative;overflow:hidden}
 #world-canvas{display:block;width:100%;height:100%}
 
 /* D-pad táctil */
-.dpad{
-  position:absolute;right:18px;bottom:18px;z-index:5;
-  display:grid;grid-template-columns:56px 56px 56px;grid-template-rows:56px 56px;
-  gap:6px;opacity:.9;touch-action:none;user-select:none;
+/* ===== Joystick táctil =====
+   Ocupa una esquina generosa de la pantalla para que el pulgar lo alcance
+   sin mirar; el aro es la zona de arrastre y la bola sigue al dedo. */
+.joystick{
+  position:absolute;left:22px;bottom:22px;z-index:6;
+  width:132px;height:132px;touch-action:none;user-select:none;
+  -webkit-user-select:none;-webkit-tap-highlight-color:transparent;
 }
-.dpad button{
-  font-size:20px;background:rgba(255,253,244,.92);color:var(--ink);
-  border:3px solid var(--rim);border-radius:16px;cursor:pointer;
-  box-shadow:0 4px 0 rgba(51,49,78,.3);font-weight:900;
+.joystick[hidden]{display:none}
+.joy-ring{
+  position:absolute;inset:0;border-radius:50%;
+  background:rgba(255,253,244,.42);
+  border:4px solid rgba(51,49,78,.5);
+  box-shadow:inset 0 3px 12px rgba(51,49,78,.18);
 }
-.dpad button:active{transform:translateY(3px);box-shadow:0 1px 0 rgba(51,49,78,.3);background:var(--accent2)}
-.dpad [data-pad="up"]{grid-column:2;grid-row:1}
-.dpad [data-pad="left"]{grid-column:1;grid-row:2}
-.dpad [data-pad="down"]{grid-column:2;grid-row:2}
-.dpad [data-pad="right"]{grid-column:3;grid-row:2}
-@media (hover:hover) and (pointer:fine){ .dpad{opacity:.3} .dpad:hover{opacity:.95} }
+.joy-knob{
+  position:absolute;left:50%;top:50%;width:58px;height:58px;
+  margin:-29px 0 0 -29px;border-radius:50%;
+  background:radial-gradient(circle at 38% 32%, #fffdf4, var(--accent2, #ffd94a));
+  border:4px solid var(--rim);
+  box-shadow:0 4px 0 rgba(51,49,78,.35);
+  transition:transform .08s ease-out;
+}
+.joystick.grabbed .joy-knob{transition:none;box-shadow:0 2px 0 rgba(51,49,78,.35)}
+.joystick.grabbed .joy-ring{background:rgba(255,253,244,.62)}
+@media (max-width:640px){
+  .joystick{width:118px;height:118px;left:16px;bottom:16px}
+  .joy-knob{width:52px;height:52px;margin:-26px 0 0 -26px}
+}
 
 /* ===== Banner de misión (nota adhesiva) ===== */
 .quest-banner{

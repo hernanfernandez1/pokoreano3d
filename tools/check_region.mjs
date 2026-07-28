@@ -59,6 +59,17 @@ for (const d of info.doors){
   console.log(`  ${ok ? "OK   " : "FALLA"}  ${d.what.padEnd(22)} (${d.x},${d.y})  ${d.zone}`);
 }
 
+// --- 2b: nada tapando la calzada ni edificios partidos entre dos zonas ---
+console.log("");
+const roadOk = !info.blockedRoad.length;
+if (!roadOk) fails.push(`${info.blockedRoad.length} casillas de calzada tapadas`);
+console.log(`  ${roadOk ? "OK   " : "FALLA"}  carreteras despejadas` +
+  (roadOk ? "" : ` — tapadas en ${info.blockedRoad.slice(0,6).map(p => `${p.x},${p.y}`).join(" ")}`));
+const strOk = !info.straddling.length;
+if (!strOk) fails.push(`${info.straddling.length} edificios a caballo entre zonas`);
+console.log(`  ${strOk ? "OK   " : "FALLA"}  ningún edificio parte una frontera` +
+  (strOk ? "" : ` — ${info.straddling.slice(0,6).map(p => `${p.sprite}@${p.x},${p.y}`).join(" ")}`));
+
 // --- 3: grafo de zonas, entrando en cada una y mirando sus salidas ---
 console.log("\nfronteras entre zonas:");
 const sides = { "-1,0":"O", "1,0":"E", "0,-1":"N", "0,1":"S" };

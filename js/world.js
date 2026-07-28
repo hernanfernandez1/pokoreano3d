@@ -11,6 +11,7 @@ const World = (() => {
   // ---------- Maps (con pila: overworld → cueva → interior) ----------
   let MW, MH, ground, solid, meta, decor, npcsCur, mode = "over";
   let mapStack = [];
+  const roadTiles = new Set();   // casillas de calzada, para no construir encima
 
   const OW = { W:132, H:104 };
 
@@ -29,9 +30,9 @@ const World = (() => {
     coastY: 94,        // línea base del mar (el sur es océano)
     beach: 8,          // ancho de la playa sobre la costa
     riverX: 88,        // río vertical, 3 tiles de ancho
-    roadsH: [26, 56, 78],
+    roadsH: [26, 56, 80],
     roadsV: [20, 64, 110],
-    roadFromY: 14, roadToY: 78,   // extremos de las verticales
+    roadFromY: 14, roadToY: 80,   // extremos de las verticales
     roadFromX: 20, roadToX: 110,  // extremos de las horizontales
   };
 
@@ -40,23 +41,38 @@ const World = (() => {
      se mueve cambiando su centro.
      `build` reparte los servicios: antes vivían todos dentro de un único
      mapa interior y no había nada que viajar. */
+  /* Solares de un pueblo, en desplazamientos desde su centro. Un edificio
+     ocupa 6 casillas de ancho y sus muros van 4 filas por debajo del ancla.
+     Los solares están elegidos para que NINGUNO pise la calzada: la vertical
+     corre por cx y cx+1, y la horizontal (en los pueblos que están sobre una)
+     por cy y cy+1. Antes el gimnasio se plantaba justo encima del cruce y
+     tapaba la carretera con la que se entra al pueblo. */
+  const TOWN_SLOTS = {
+    gym: [  3, -9],   // preside la plaza, al este de la calzada
+    a:   [ -8, -9],   // servicio principal, al oeste
+    b:   [ 11,  2],   // segundo servicio, al sureste
+    h1:  [-15, -9],
+    h2:  [ -8,  2],
+    h3:  [  3,  2],
+  };
   const TOWNS = [
     { gym:"hangul", name:"Pueblo Hangul", ko:"한글 마을", cx:20,  cy:14, sprite:"house", plaza:"fuente",
-      build:[["casa","casadoor",-14,-3], ["alcaldia","alcaldiadoor",8,-3]], houses:[[-14,7],[8,7]] },
+      build:[["casa","casadoor","a"], ["alcaldia","alcaldiadoor","b"]], houses:["h1","h2"] },
     { gym:"numeros", name:"Pueblo Sutja", ko:"숫자 마을", cx:64,  cy:14, sprite:"barn", plaza:"jardin",
-      build:[["shop","shopdoor",-14,-3]], houses:[[8,-3],[-14,7],[8,7]] },
+      build:[["shop","shopdoor","a"]], houses:["h1","h2","h3"] },
     { gym:"particulas", name:"Pueblo Josa", ko:"조사 마을", cx:110, cy:14, sprite:"house", plaza:"fuente",
-      build:[["academia","academiadoor",8,-3]], houses:[[-14,-3],[-14,7]] },
-    { gym:"verbos", name:"Pueblo Dongsa", ko:"동사 마을", cx:110, cy:44, sprite:"barn", plaza:"jardin",
-      build:[["norebang","norebangdoor",-14,-3]], houses:[[8,-3],[8,7]] },
+      build:[["academia","academiadoor","a"]], houses:["h1","h3"] },
+    { gym:"verbos", name:"Pueblo Dongsa", ko:"동사 마을", cx:110, cy:46, sprite:"barn", plaza:"jardin",
+      build:[["norebang","norebangdoor","a"]], houses:["h2","h3"] },
     { gym:"topik2", name:"Pueblo Topik", ko:"토픽 마을", cx:20,  cy:56, sprite:"house", plaza:"fuente",
-      build:[], houses:[[-14,-3],[8,-3],[8,7]] },
-    { gym:"topik1", name:"Puerto Topik", ko:"토픽 항구", cx:64,  cy:78, sprite:"barn", plaza:"jardin",
-      build:[], houses:[[-14,-3],[8,-3]] },
-    { gym:"honor", name:"Pueblo Jondae", ko:"존경 마을", cx:110, cy:78, sprite:"house", plaza:"fuente",
-      build:[["cafe","cafedoor",-14,-3]], houses:[[8,-3]] },
+      build:[], houses:["h1","h2","h3"] },
+    { gym:"topik1", name:"Puerto Topik", ko:"토픽 항구", cx:64,  cy:80, sprite:"barn", plaza:"jardin",
+      build:[], houses:["h1","h2"] },
+    { gym:"honor", name:"Pueblo Jondae", ko:"존경 마을", cx:110, cy:80, sprite:"house", plaza:"fuente",
+      build:[["cafe","cafedoor","a"]], houses:["h3"] },
     // "maestro" vive dentro de la cueva, no tiene pueblo
   ];
+  const slotAt = (t, key) => ({ x: t.cx + TOWN_SLOTS[key][0], y: t.cy + TOWN_SLOTS[key][1] });
   // piezas de paisaje del pack, en la playa y en el mar
   const SEA_HOUSE_AT = { x:32, y:88 };   // casa en la playa oeste
   const GARDEN_AT    = { x:104, y:99 };  // isla-jardín en mar abierto
@@ -76,7 +92,7 @@ const World = (() => {
     { x:94, y:26, w:16, h:14 },   // bosquete del este
   ];
   // el gimnasio preside la plaza: su puerta mira al centro del pueblo
-  const gymAnchor = t => ({ x: t.cx - 3, y: t.cy - 9 });
+  const gymAnchor = t => slotAt(t, "gym");
   const gymHouses = TOWNS.map(t => ({ key: t.gym, sprite: t.sprite, ...gymAnchor(t) }));
 
 
@@ -132,16 +148,17 @@ const World = (() => {
       putLamp(g.x+1, g.y+8);
       putLamp(g.x+4, g.y+8);
     }
-    // servicios repartidos: [tag, tipo de puerta, dx, dy] desde el centro
-    (t.build || []).forEach(([tag, doorType, dx, dy], i) => {
+    // servicios repartidos: [tag, tipo de puerta, solar]
+    (t.build || []).forEach(([tag, doorType, slot], i) => {
       const spr = tag === "casa" ? "house" : (i % 2 ? "barn" : "houseG");
-      const bx = t.cx + dx, by = t.cy + dy;
-      putBuilding(bx, by, spr, doorType, tag);
-      paveWalk(bx+2, by+8, dx < 0 ? plaza.x0 : plaza.x1, t.cy);
+      const p = slotAt(t, slot);
+      putBuilding(p.x, p.y, spr, doorType, tag);
+      paveWalk(p.x+2, p.y+8, p.x < t.cx ? plaza.x0 : plaza.x1, t.cy);
     });
     // casas de vecinos, sin puerta: dan volumen para que no sea una plaza pelada
-    (t.houses || []).forEach(([dx, dy], i) => {
-      putBuilding(t.cx + dx, t.cy + dy, TOWN_HOUSE_SPRITES[(i + t.cx) % 3], null, null);
+    (t.houses || []).forEach((slot, i) => {
+      const p = slotAt(t, slot);
+      putBuilding(p.x, p.y, TOWN_HOUSE_SPRITES[(i + t.cx) % 3], null, null);
     });
     /* Toque propio de cada pueblo: sin esto los siete salían calcados. La
        pieza va apartada del eje de la calzada para no cortar el paso. */
@@ -344,8 +361,10 @@ const World = (() => {
       .forEach(([x,y]) => { ground[y][x]="grass"; solid[y][x]=false; });
 
     // CARRETERAS: la malla que une los pueblos (2 tiles de ancho)
-    const pathH = (y,x0,x1) => { for (let x=x0;x<=x1;x++){ if (!solid[y]?.[x]) ground[y][x]="path"; if (!solid[y+1]?.[x]) ground[y+1][x]="path"; } };
-    const pathV = (x,y0,y1) => { for (let y=y0;y<=y1;y++){ if (!solid[y]?.[x]) ground[y][x]="path"; if (!solid[y]?.[x+1]) ground[y][x+1]="path"; } };
+    roadTiles.clear();
+    const road = (x, y) => { if (!solid[y]?.[x]){ ground[y][x]="path"; roadTiles.add(x + "," + y); } };
+    const pathH = (y,x0,x1) => { for (let x=x0;x<=x1;x++){ road(x, y); road(x, y+1); } };
+    const pathV = (x,y0,y1) => { for (let y=y0;y<=y1;y++){ road(x, y); road(x+1, y); } };
     REGION.roadsH.forEach(y => pathH(y, REGION.roadFromX, REGION.roadToX));
     REGION.roadsV.forEach(x => pathV(x, REGION.roadFromY, REGION.roadToY));
     // puentes de madera donde cada horizontal cruza el río
@@ -507,7 +526,11 @@ const World = (() => {
      que cada frontera tiene exactamente un paso.
      ========================================================== */
   const ZONE_COLS = [0, 44, 88, 132];
-  const ZONE_ROWS = [0, 36, 70, 104];
+  /* Los cortes horizontales dejan sitio de sobra por encima del centro de
+     cada pueblo: el ancla de un edificio va 9 filas más arriba, y si cae en
+     la zona vecina su parte sólida se queda aquí sin nada que dibujar — un
+     muro invisible. */
+  const ZONE_ROWS = [0, 34, 68, 104];
   const ZONE_NAMES = [
     ["Pueblo Hangul",  "Pueblo Sutja",  "Pueblo Josa"],
     ["Pueblo Topik",   "Valle del Lago", "Pueblo Dongsa"],
@@ -682,6 +705,16 @@ const World = (() => {
 
   // ---------- Tienda ----------
   function putBuilding(x, y, sprite, doorType, tag){
+    /* Un edificio sobre la calzada la corta en seco, y como la plaza está
+       pavimentada alrededor el fallo no rompe la conectividad: se queda
+       escondido hasta que alguien llega por esa carretera y se topa con el
+       muro. Mejor cantarlo al construir. */
+    for (let dy=4;dy<8;dy++) for (let dx=0;dx<6;dx++){
+      if (roadTiles.has((x+dx) + "," + (y+dy))){
+        console.warn(`[mapa] el edificio ${tag||sprite} en ${x},${y} pisa la carretera en ${x+dx},${y+dy}`);
+        break;
+      }
+    }
     clearTreesRect(x-4, y-5, x+7, y+9);
     const d = { sprite }; if (tag) d[tag]=true;
     decor[y][x] = d;
@@ -3439,19 +3472,75 @@ const World = (() => {
     window.addEventListener("keyup", e => { keys[e.key]=false; });
     document.getElementById("dialog").addEventListener("click", advanceDialog);
 
-    const padKey = { up:"ArrowUp", down:"ArrowDown", left:"ArrowLeft", right:"ArrowRight" };
-    document.querySelectorAll("[data-pad]").forEach(b => {
-      const k = padKey[b.dataset.pad];
-      const on  = e => { e.preventDefault(); if (Dialog.open){ advanceDialog(); return; } keys[k]=true; };
-      const off = e => { e.preventDefault(); keys[k]=false; };
-      b.addEventListener("pointerdown", on);
-      b.addEventListener("pointerup", off);
-      b.addEventListener("pointerleave", off);
-      b.addEventListener("pointercancel", off);
-    });
+    setupJoystick();
     loop();
     setInterval(() => { if (document.hidden) tick(); }, 50);
     UI.refreshTopbar();
+  }
+
+  /* ==========================================================
+     JOYSTICK TÁCTIL
+     Sustituye a las flechas en pantalla. Solo se muestra en dispositivos de
+     puntero grueso (dedo): con ratón estorbaba y ya está el teclado.
+
+     El movimiento del juego es por casillas, así que el joystick no da un
+     vector continuo: traduce la dirección dominante del arrastre a la misma
+     tecla que usaría el teclado, y así comparte toda la lógica de avance.
+     ========================================================== */
+  const JOY_DEAD = 0.28;   // fracción del radio que se ignora, para no derivar
+  function setupJoystick(){
+    const pad = document.getElementById("joystick");
+    const knob = document.getElementById("joy-knob");
+    if (!pad || !knob) return;
+    // en escritorio no se dibuja: sobra con el teclado
+    const touch = window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
+    if (!touch) return;
+    pad.hidden = false;
+
+    const DIRS = { up:"ArrowUp", down:"ArrowDown", left:"ArrowLeft", right:"ArrowRight" };
+    let active = null, cx = 0, cy = 0, radius = 1;
+
+    const release = () => {
+      Object.values(DIRS).forEach(k => { keys[k] = false; });
+      knob.style.transform = "";
+      pad.classList.remove("grabbed");
+      active = null;
+    };
+    const aim = (px, py) => {
+      const dx = px - cx, dy = py - cy;
+      const d = Math.hypot(dx, dy);
+      // la bola no se sale del aro
+      const cap = Math.min(d, radius) || 0;
+      const ux = d ? dx/d : 0, uy = d ? dy/d : 0;
+      knob.style.transform = `translate(${ux*cap}px, ${uy*cap}px)`;
+      Object.values(DIRS).forEach(k => { keys[k] = false; });
+      if (d < radius * JOY_DEAD) return;
+      // una sola dirección a la vez: el mapa es una rejilla, no un plano libre
+      if (Math.abs(dx) > Math.abs(dy)) keys[dx > 0 ? DIRS.right : DIRS.left] = true;
+      else keys[dy > 0 ? DIRS.down : DIRS.up] = true;
+    };
+
+    pad.addEventListener("pointerdown", e => {
+      e.preventDefault();
+      if (Dialog.open){ advanceDialog(); return; }
+      const r = pad.getBoundingClientRect();
+      cx = r.left + r.width/2; cy = r.top + r.height/2;
+      radius = r.width/2 - 12;
+      active = e.pointerId;
+      pad.classList.add("grabbed");
+      pad.setPointerCapture(e.pointerId);
+      aim(e.clientX, e.clientY);
+    });
+    pad.addEventListener("pointermove", e => {
+      if (active !== e.pointerId) return;
+      e.preventDefault();
+      aim(e.clientX, e.clientY);
+    });
+    ["pointerup", "pointercancel", "pointerleave"].forEach(ev =>
+      pad.addEventListener(ev, e => { if (active === e.pointerId) release(); }));
+    // si la pantalla cambia de mano o se pierde el foco, soltar
+    window.addEventListener("blur", release);
+    document.addEventListener("visibilitychange", () => { if (document.hidden) release(); });
   }
 
   // Frame del personaje de papel (con la skin activa) para UI de batalla/topbar
@@ -3502,8 +3591,25 @@ const World = (() => {
       for (let x=0;x<region.W;x++) row += region.solid[y][x] ? "#" : ".";
       walk.push(row);
     }
+    // calzada tapada por algo (un edificio encima corta la ruta de acceso)
+    const blockedRoad = [];
+    roadTiles.forEach(k => {
+      const [x, y] = k.split(",").map(Number);
+      if (region.solid[y]?.[x]) blockedRoad.push({ x, y });
+    });
+    /* Edificios a caballo entre dos zonas: el ancla se dibuja en una y los
+       muros bloquean en la otra, así que del lado sin ancla queda un muro
+       invisible. */
+    const straddling = [];
+    for (let y=0;y<region.H;y++) for (let x=0;x<region.W;x++){
+      const d = region.decor[y][x];
+      if (!d || !HOUSE_VARIANT[d.sprite]) continue;
+      const a = zoneAt(x, y), b = zoneAt(x+5, y+7);
+      if (a.i !== b.i || a.j !== b.j) straddling.push({ x, y, sprite:d.sprite });
+    }
     return {
       W: region.W, H: region.H, mode, doors, walk,
+      blockedRoad, straddling,
       cols: ZONE_COLS, rows: ZONE_ROWS,
       zone: { ...curZone, name: ZONE_NAMES[curZone.j][curZone.i] },
       player: toGlobal(player.x, player.y),

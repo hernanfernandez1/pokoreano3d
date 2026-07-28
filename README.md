@@ -25,9 +25,10 @@ mascotas, historia por capítulos y práctica de voz.
   suelo y lámina de agua comparten la misma silueta.
 - **Diorama del jardín** (`js/envGarden.js`) emergiendo del mar al suroeste y **casa en el
   mar** (`js/seaHouse.js`) en la playa, como piezas de paisaje de fondo.
-- **D-pad táctil** integrado en el mapa (esquina inferior derecha), además de teclado.
+- **Joystick táctil** en teléfonos y tablets (esquina inferior izquierda). En escritorio
+  no se dibuja: sobra con el teclado. La barra superior se compacta en una sola fila.
 - Depuración: `index.html?autostart=1` entra directo al mapa; admite `&tp=x,y`,
-  `&enter=gym|cave|shop|cafe|alcaldia|academia|norebang|home|pueblo` y `&test=battle|capture`.
+  `&enter=gym|cave|shop|cafe|alcaldia|academia|norebang|home` y `&test=battle|capture`.
 
 ## La región
 
@@ -60,6 +61,7 @@ node tools/shot_world.mjs [prefijo]   # una captura por zona → test-shots/
 node tools/check_region.mjs           # accesos, fronteras, cruce a pie y guardado
 node tools/perf_world.mjs             # FPS y errores de consola
 node tools/smoke_world.mjs            # puertas, interiores, batalla y captura
+node tools/check_joystick.mjs         # joystick táctil, emulando un móvil
 node tools/shot_envassets.mjs         # hoja de contactos de ENV_ASSETS
 ```
 
@@ -116,31 +118,31 @@ El Gimnasio Maestro está escondido dentro de la **cueva** del bosque (noreste).
 
 ## Modo historia
 
-El **pueblo 마을** (puerta oeste del mapa) tiene ahora una plaza con fuente y varios
-edificios que puedes visitar:
-- **시청 Alcaldía** — la alcaldesa te da las misiones.
-- **카페 Café** — un menú de comida: identifica el plato coreano y ganas monedas.
-- **학원 Academia** — clase de repaso de 5 preguntas (repasa tu vocabulario, ganas XP).
+Los servicios están **repartidos por la región**, así que hay que viajar para usarlos:
 
-También tienes la **집 Casa de Karol** en la pradera noroeste del mapa: es tu base, con
-un gato y un punto de guardado 💾.
+- **시청 Alcaldía** (Pueblo Hangul) — la alcaldesa te da las misiones de cada capítulo.
+- **집 Casa de Karol** (Pueblo Hangul) — tu base, con un gato y un punto de guardado 💾.
+- **상점 Tienda** (Pueblo Sutja) — mascotas y cajas de skins.
+- **학원 Academia** (Pueblo Josa) — clase de repaso de 5 preguntas.
+- **노래방 Norebang** (Pueblo Dongsa) — karaoke, y Rina espera fuera para el duelo.
+- **카페 Café** (Pueblo Jondae) — identifica el plato coreano y ganas monedas.
+- **Muelle de pesca** (Puerto Topik) y la **cueva del Maestro** (Valle del Lago).
 
-La **alcaldesa** (alcaldía 시청, en el pueblo 마을 tras la puerta oeste) te da las misiones
-de cada capítulo: hablar con personajes, vencer palabras, capturar guardianes y pescar
-en el **muelle** de la playa. Cada capítulo desbloquea un gimnasio, que además exige un
-**nivel mínimo de estudiante** (⭐ ganas XP con cada respuesta correcta). La misión actual
-se ve siempre en el banner del mapa.
+Cada capítulo desbloquea un gimnasio, que además exige un **nivel mínimo de estudiante**
+(⭐ ganas XP con cada respuesta correcta). La misión actual se ve siempre en el banner
+del mapa, y el minimapa de la esquina muestra la zona en la que estás.
 
 ## Tienda y mascotas
 
-La **tienda 상점** está junto al cruce de caminos: entra por la puerta y habla con el
+La **tienda 상점** está en **Pueblo Sutja**: entra por la puerta y habla con el
 tendero. Con monedas puedes comprar **mascotas** (병아리 pollito, 토끼 conejo, 고양이 gato,
 강아지 perrito) que te siguen por el mapa, o una **caja de skins** (200 monedas).
 En la **Mochila** gestionas mascotas, skins y ves tus medallas.
 
 ## Controles
 
-- **Flechas / WASD** — caminar (D-pad táctil en pantalla, también en escritorio)
+- **Flechas / WASD** — caminar. En teléfonos y tablets aparece un **joystick táctil**
+  en la esquina inferior izquierda (en escritorio no se dibuja: sobra con el teclado).
 - **Hierba alta** — encuentros con palabras salvajes
 - **Casas** — gimnasios (exámenes). Se desbloquean en orden ganando medallas.
 - **NPCs** (con burbuja "…") — camina hacia ellos para hablar: frases en coreano
@@ -196,5 +198,3 @@ Se guarda en localStorage y entra al pool de encuentros.
   `tools/blend2gltf.py` y horneado con `tools/room2js.mjs` → `js/homeRoom.js`.
 - Los PNG antiguos de `assets/gfx/` (Kenmi / ArMM1998) ya **no se cargan**, salvo las
   texturas del pack en `assets/gfx/env/`; se conservan por historia del proyecto.
-#   p o k o r e a n o 3 d  
- 
