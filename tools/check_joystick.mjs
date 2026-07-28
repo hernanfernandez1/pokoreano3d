@@ -42,6 +42,44 @@ const errors = [];
   await page.close();
 }
 
+// --- que quepa entero en pantallas de todos los tamaños ---
+{
+  const UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148";
+  const sizes = [
+    ["móvil pequeño",   320, 568],
+    ["móvil estándar",  390, 844],
+    ["móvil grande",    430, 932],
+    ["móvil apaisado",  844, 390],
+    ["tablet",          820, 1180],
+    ["tablet apaisada",1180,  820],
+  ];
+  for (const [nombre, w, h] of sizes){
+    const page = await browser.newPage();
+    await page.emulate({ name: nombre, userAgent: UA,
+      viewport: { width: w, height: h, isMobile: true, hasTouch: true, deviceScaleFactor: 2 } });
+    page.on("dialog", d => d.accept());
+    page.on("pageerror", e => errors.push(nombre + ": " + e.message));
+    await page.goto("http://localhost:8121/index.html", { waitUntil: "load" });
+    await page.click('[data-action="new-game"]');
+    await page.waitForFunction('typeof World !== "undefined" && World.debug().ready', { timeout: 20000 });
+    const r = await page.evaluate(() => {
+      const b = document.getElementById("joystick").getBoundingClientRect();
+      return { left:b.left, top:b.top, right:b.right, bottom:b.bottom, w:b.width, h:b.height,
+        vw: window.innerWidth, vh: window.innerHeight };
+    });
+    const dentro = r.left >= 0 && r.top >= 0 && r.right <= r.vw + 0.5 && r.bottom <= r.vh + 0.5;
+    const derecha = r.left > r.vw/2;   // debe quedar en la mitad derecha
+    const usable = r.w >= 90;          // y con tamaño suficiente para el pulgar
+    check(`${nombre} (${w}x${h}): entero en pantalla`, dentro,
+      `caja ${r.left.toFixed(0)},${r.top.toFixed(0)}→${r.right.toFixed(0)},${r.bottom.toFixed(0)} en ${r.vw}x${r.vh}`);
+    check(`${nombre}: a la derecha`, derecha);
+    check(`${nombre}: tamaño usable`, usable, `${r.w.toFixed(0)}px`);
+    if (nombre === "móvil estándar")
+      await page.screenshot({ path: path.join(root, "test-shots/joystick_movil.png") });
+    await page.close();
+  }
+}
+
 // --- móvil: joystick visible y funcional ---
 {
   const page = await browser.newPage();

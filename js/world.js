@@ -3525,7 +3525,9 @@ const World = (() => {
       if (Dialog.open){ advanceDialog(); return; }
       const r = pad.getBoundingClientRect();
       cx = r.left + r.width/2; cy = r.top + r.height/2;
-      radius = r.width/2 - 12;
+      // recorrido de la bola: hasta el aro menos su propio radio (44%/2), en
+      // proporción, para que valga igual sea cual sea el tamaño del pad
+      radius = r.width * 0.28;
       active = e.pointerId;
       pad.classList.add("grabbed");
       pad.setPointerCapture(e.pointerId);

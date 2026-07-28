@@ -25,7 +25,7 @@ mascotas, historia por capítulos y práctica de voz.
   suelo y lámina de agua comparten la misma silueta.
 - **Diorama del jardín** (`js/envGarden.js`) emergiendo del mar al suroeste y **casa en el
   mar** (`js/seaHouse.js`) en la playa, como piezas de paisaje de fondo.
-- **Joystick táctil** en teléfonos y tablets (esquina inferior izquierda). En escritorio
+- **Joystick táctil** en teléfonos y tablets (esquina inferior derecha). En escritorio
   no se dibuja: sobra con el teclado. La barra superior se compacta en una sola fila.
 - Depuración: `index.html?autostart=1` entra directo al mapa; admite `&tp=x,y`,
   `&enter=gym|cave|shop|cafe|alcaldia|academia|norebang|home` y `&test=battle|capture`.
