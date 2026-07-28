@@ -33,8 +33,16 @@ const State = (() => {
       return cur;
     } catch(e){ return null; }
   }
+  /* Enganches que se ejecutan justo antes de escribir la partida. World se
+     registra aquí para dejar apuntada la zona y la casilla exactas: antes
+     solo se anotaban al pisar una casilla nueva, así que guardar parado
+     (o desde el menú) escribía una posición vieja. */
+  const beforeSave = [];
+  function onBeforeSave(fn){ beforeSave.push(fn); }
+
   function save(){
     if (!cur) return;
+    beforeSave.forEach(fn => { try { fn(cur); } catch(e){} });
     localStorage.setItem(KEY, JSON.stringify(cur));
   }
   function reset(){
@@ -142,7 +150,7 @@ const State = (() => {
   }
 
   return {
-    load, save, reset, get, defaults,
+    load, save, reset, get, defaults, onBeforeSave,
     catchWord, reviewWord, grantBadge, addCoins, spendCoins,
     unlockSkin, setSkin, setGymBest,
     catchGuardian, setTeam, addTeamXp,

@@ -30,7 +30,7 @@ await page.click('[data-action="new-game"]');
 await page.waitForFunction('typeof World !== "undefined" && World.debug().ready', { timeout: 20000 });
 
 const results = {};
-for (const [name, x, y] of [["pradera",30,32], ["bosque",72,14], ["playa",34,60]]){
+for (const [name, x, y] of [["plaza",20,20], ["borde",30,10], ["camino",10,25]]){
   await page.evaluate((x,y) => World.tp(x,y), x, y);
   await new Promise(r => setTimeout(r, 1200));
   results[name] = await page.evaluate(() => new Promise(res => {

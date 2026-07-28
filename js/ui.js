@@ -8,7 +8,10 @@ const UI = (() => {
 
   function showScreen(id){
     $$(".screen").forEach(s => s.classList.remove("active"));
-    $("#"+id).classList.add("active");
+    const sc = $("#"+id);
+    sc.classList.remove("active");
+    void sc.offsetWidth; // reinicia la animación de entrada
+    sc.classList.add("active");
   }
   function toast(msg, ms=1600){
     const t = $("#toast");
@@ -26,25 +29,56 @@ const UI = (() => {
       : Sprites.skinSvg(State.get().activeSkin);
   }
 
+  // Texto flotante estilo arcade ("+5", "-25 HP") anclado a un elemento
+  function floatText(anchor, txt, cls=""){
+    if (!anchor) return;
+    const f = document.createElement("div");
+    f.className = ("float-txt " + cls).trim();
+    f.textContent = txt;
+    anchor.appendChild(f);
+    setTimeout(() => f.remove(), 1050);
+  }
+
   function updateQuestBanner(){
     const el = $("#quest-banner");
     if (!el) return;
     const q = Quests.current();
-    if (!q){ el.textContent = "📜 Historia completada — ¡eres maestra del coreano!"; return; }
-    const s = State.get();
-    const prog = q.goal.n ? ` (${s.questProg}/${q.goal.n})` : "";
-    el.textContent = `📜 Cap.${q.cap} · ${q.title}${prog}`;
-    el.title = q.desc;
+    if (!q){ el.textContent = "📜 Historia completada — ¡eres maestra del coreano!"; }
+    else {
+      const s = State.get();
+      const prog = q.goal.n ? ` (${s.questProg}/${q.goal.n})` : "";
+      el.textContent = `📜 Cap.${q.cap} · ${q.title}${prog}`;
+      el.title = q.desc;
+    }
+    el.classList.remove("pop"); void el.offsetWidth; el.classList.add("pop");
+  }
+
+  // Stats de la topbar: bump + "+N" flotante cuando suben
+  const _prevStats = {};
+  function setStat(sel, key, val){
+    const el = $(sel);
+    if (!el) return;
+    const chip = el.closest(".stat");
+    const old = _prevStats[key];
+    el.textContent = val;
+    if (chip && old !== undefined && old !== val){
+      chip.classList.remove("bump"); void chip.offsetWidth; chip.classList.add("bump");
+      if (typeof val === "number" && val > old) floatText(chip, `+${val - old}`);
+    }
+    _prevStats[key] = val;
   }
 
   function refreshTopbar(){
     const s = State.get();
     $("#player-name").textContent = s.playerName;
-    $("#stat-level").textContent = Quests.level();
-    $("#stat-badges").textContent = s.badges.length;
-    $("#stat-vocab").textContent = Object.keys(s.caughtWords).length;
-    $("#stat-guardians").textContent = Object.keys(s.guardians || {}).length;
-    $("#stat-coins").textContent = s.coins;
+    setStat("#stat-level", "level", Quests.level());
+    setStat("#stat-badges", "badges", s.badges.length);
+    setStat("#stat-vocab", "vocab", Object.keys(s.caughtWords).length);
+    setStat("#stat-guardians", "guardians", Object.keys(s.guardians || {}).length);
+    setStat("#stat-coins", "coins", s.coins);
+    const xpIn = Quests.xpIntoLevel();
+    $("#xp-fill").style.width = Math.round(xpIn / Quests.XP_PER_LEVEL * 100) + "%";
+    $("#xp-text").textContent = `XP ${xpIn}/${Quests.XP_PER_LEVEL}`;
     $("#player-avatar").innerHTML = playerSpriteHTML(0);
   }
 
@@ -129,6 +163,7 @@ const UI = (() => {
       $("#battle-feedback").textContent = `💥 ¡GOLPE CRÍTICO DE VOZ! -${dmg} HP`;
       $("#battle-feedback").className = "feedback ok";
       $("#enemy-sprite").classList.add("dmg-flash");
+      floatText($("#enemy-sprite"), `-${dmg}`, "crit");
       setTimeout(() => $("#enemy-sprite").classList.remove("dmg-flash"), 350);
       State.catchWord(battle.word);
       State.reviewWord(target, true);
@@ -158,6 +193,7 @@ const UI = (() => {
       $("#battle-feedback").textContent = `¡Correcto! -${dmg} HP`;
       $("#battle-feedback").className = "feedback ok";
       $("#enemy-sprite").classList.add("dmg-flash");
+      floatText($("#enemy-sprite"), `-${dmg}`, "dmg");
       setTimeout(() => $("#enemy-sprite").classList.remove("dmg-flash"), 350);
       State.catchWord(q.word);
       State.reviewWord(q.word.han, true);
@@ -173,6 +209,7 @@ const UI = (() => {
       $("#battle-feedback").textContent = `Fallaste. Respuesta: ${q.correct}`;
       $("#battle-feedback").className = "feedback bad";
       $("#battle-player-sprite").classList.add("dmg-flash");
+      floatText($("#battle-player-sprite"), `-${dmg}`, "dmg");
       setTimeout(() => $("#battle-player-sprite").classList.remove("dmg-flash"), 350);
       State.reviewWord(q.word.han, false);
     }
@@ -181,10 +218,21 @@ const UI = (() => {
   }
 
   function updateBattleUI(){
-    $("#enemy-hp").style.width = battle.enemyHP + "%";
-    $("#player-hp").style.width = battle.playerHP + "%";
-    $("#combo").textContent = battle.combo;
+    setHP($("#enemy-hp"), battle.enemyHP);
+    setHP($("#player-hp"), battle.playerHP);
+    const c = $("#combo");
+    if (c.textContent !== String(battle.combo)){
+      c.textContent = battle.combo;
+      const lbl = c.closest(".label");
+      lbl.classList.remove("bump"); void lbl.offsetWidth; lbl.classList.add("bump");
+    }
+    c.closest(".label").classList.toggle("hot", battle.combo >= 3);
     refreshTopbar();
+  }
+  function setHP(el, v){
+    el.style.width = v + "%";
+    el.classList.toggle("mid", v <= 60 && v > 30);
+    el.classList.toggle("low", v <= 30);
   }
 
   function endBattle(won){

@@ -12,23 +12,170 @@ const World = (() => {
   let MW, MH, ground, solid, meta, decor, npcsCur, mode = "over";
   let mapStack = [];
 
-  const OW = { W:96, H:72 };
+  const OW = { W:132, H:104 };
 
-  const gymHouses = [
-    { key:"hangul",     x: 10, y: 8,  sprite:"house" },  // pradera NO
-    { key:"numeros",    x: 34, y: 6,  sprite:"barn"  },  // pradera N
-    { key:"particulas", x: 66, y: 12, sprite:"house" },  // bosque O
-    { key:"verbos",     x: 84, y: 22, sprite:"barn"  },  // bosque profundo
-    { key:"honor",      x: 72, y: 48, sprite:"house" },  // SE, cerca de la costa
-    { key:"topik1",     x: 34, y: 50, sprite:"barn"  },  // costa (puerta a la playa)
-    { key:"topik2",     x: 10, y: 36, sprite:"house" },  // pradera O
-    // "maestro" vive dentro de la cueva (bioma bosque, NE)
+  /* ==========================================================
+     LA REGIÓN
+     El mapa se describe con datos, no con coordenadas sueltas repartidas
+     por buildOverworld(): accidentes del terreno, malla de carreteras y
+     pueblos. Mover un pueblo es cambiar un número aquí.
+
+     Trazado: tres carreteras horizontales y tres verticales forman una
+     cuadrícula; cada pueblo se planta en un cruce o en el extremo de una
+     vertical, así que siempre se llega por camino. El río parte la región
+     de norte a sur y solo se cruza por los puentes de las horizontales.
+     ========================================================== */
+  const REGION = {
+    coastY: 94,        // línea base del mar (el sur es océano)
+    beach: 8,          // ancho de la playa sobre la costa
+    riverX: 88,        // río vertical, 3 tiles de ancho
+    roadsH: [26, 56, 78],
+    roadsV: [20, 64, 110],
+    roadFromY: 14, roadToY: 78,   // extremos de las verticales
+    roadFromX: 20, roadToX: 110,  // extremos de las horizontales
+  };
+
+  /* Pueblos. cx/cy es el centro de la plaza; los edificios se colocan
+     alrededor con desplazamientos relativos, de modo que un pueblo entero
+     se mueve cambiando su centro.
+     `build` reparte los servicios: antes vivían todos dentro de un único
+     mapa interior y no había nada que viajar. */
+  const TOWNS = [
+    { gym:"hangul", name:"Pueblo Hangul", ko:"한글 마을", cx:20,  cy:14, sprite:"house", plaza:"fuente",
+      build:[["casa","casadoor",-14,-3], ["alcaldia","alcaldiadoor",8,-3]], houses:[[-14,7],[8,7]] },
+    { gym:"numeros", name:"Pueblo Sutja", ko:"숫자 마을", cx:64,  cy:14, sprite:"barn", plaza:"jardin",
+      build:[["shop","shopdoor",-14,-3]], houses:[[8,-3],[-14,7],[8,7]] },
+    { gym:"particulas", name:"Pueblo Josa", ko:"조사 마을", cx:110, cy:14, sprite:"house", plaza:"fuente",
+      build:[["academia","academiadoor",8,-3]], houses:[[-14,-3],[-14,7]] },
+    { gym:"verbos", name:"Pueblo Dongsa", ko:"동사 마을", cx:110, cy:44, sprite:"barn", plaza:"jardin",
+      build:[["norebang","norebangdoor",-14,-3]], houses:[[8,-3],[8,7]] },
+    { gym:"topik2", name:"Pueblo Topik", ko:"토픽 마을", cx:20,  cy:56, sprite:"house", plaza:"fuente",
+      build:[], houses:[[-14,-3],[8,-3],[8,7]] },
+    { gym:"topik1", name:"Puerto Topik", ko:"토픽 항구", cx:64,  cy:78, sprite:"barn", plaza:"jardin",
+      build:[], houses:[[-14,-3],[8,-3]] },
+    { gym:"honor", name:"Pueblo Jondae", ko:"존경 마을", cx:110, cy:78, sprite:"house", plaza:"fuente",
+      build:[["cafe","cafedoor",-14,-3]], houses:[[8,-3]] },
+    // "maestro" vive dentro de la cueva, no tiene pueblo
   ];
+  // piezas de paisaje del pack, en la playa y en el mar
+  const SEA_HOUSE_AT = { x:32, y:88 };   // casa en la playa oeste
+  const GARDEN_AT    = { x:104, y:99 };  // isla-jardín en mar abierto
+
+  const TOWN_W = 30, TOWN_H = 22;   // extensión del pueblo alrededor del centro
+  const townRect = t => ({ x: t.cx - TOWN_W/2, y: t.cy - TOWN_H/2, w: TOWN_W, h: TOWN_H });
+  const inTown = (x, y) => TOWNS.some(t => {
+    const r = townRect(t);
+    return x >= r.x-1 && x < r.x+r.w+1 && y >= r.y-1 && y < r.y+r.h+1;
+  });
+
+  // manchas de bosque, para el banner de zona y para sembrar los árboles
+  const FORESTS = [
+    { x:68, y:30, w:19, h:26 },   // bosque profundo, orilla oeste del río
+    { x:68, y:58, w:19, h:18 },   // bosque del sur
+    { x:34, y:60, w:24, h:14 },   // arboleda del suroeste
+    { x:94, y:26, w:16, h:14 },   // bosquete del este
+  ];
+  // el gimnasio preside la plaza: su puerta mira al centro del pueblo
+  const gymAnchor = t => ({ x: t.cx - 3, y: t.cy - 9 });
+  const gymHouses = TOWNS.map(t => ({ key: t.gym, sprite: t.sprite, ...gymAnchor(t) }));
+
+
+  // Farola de papel: el decor va 2 filas arriba de su base sólida
+  function putLamp(x, yBase){
+    const dy = yBase - 2;
+    if (dy < 0 || dy >= MH) return;
+    if (decor[dy]?.[x] || solid[yBase]?.[x] || meta[yBase]?.[x]) return;
+    decor[dy][x] = { sprite:"lamp" };
+    solid[yBase][x] = true;
+  }
+
+  // Pavimenta la plaza del pueblo, quita árboles y planta farolas y letrero
+  /* Levanta un pueblo entero alrededor de su centro: adoquina la plaza,
+     planta el gimnasio presidiéndola, reparte los servicios que le tocan
+     (cada uno con su puerta al interior que ya existía) y llena los huecos
+     con casas de vecinos, farolas y el letrero de entrada. */
+  const TOWN_HOUSE_SPRITES = ["house", "barn", "houseG"];
+  // adoquina una casilla si es terreno natural (nunca pisa agua ni edificios)
+  const PAVABLE = ["grass","flower","flower2","flower3","tuft","tallgrass","mush","rock","dirtA"];
+  function pave(x, y){
+    if (!ground[y] || ground[y][x] === undefined) return;
+    if (solid[y][x] || decor[y][x] || meta[y][x]) return;
+    if (!PAVABLE.includes(ground[y][x])) return;
+    ground[y][x] = "path";
+  }
+  // sendero en L de 2 tiles de ancho, de una puerta a la plaza
+  function paveWalk(x0, y0, x1, y1){
+    const sx = Math.sign(x1-x0) || 1;
+    for (let x=x0; x!==x1+sx; x+=sx){ pave(x, y0); pave(x, y0+1); }
+    const sy = Math.sign(y1-y0) || 1;
+    for (let y=y0; y!==y1+sy; y+=sy){ pave(x1, y); pave(x1+1, y); }
+  }
+
+  function buildTown(t){
+    const r = townRect(t);
+    clearTreesRect(r.x-2, r.y-2, r.x+r.w+1, r.y+r.h+1);
+
+    /* Plaza central, no el pueblo entero: adoquinar los 30x22 completos
+       convertía cada pueblo en un descampado de tierra. Ahora el césped se
+       queda y solo se pavimenta la plaza y los senderos a las puertas. */
+    const plaza = { x0:t.cx-7, x1:t.cx+7, y0:t.cy-3, y1:t.cy+4 };
+    for (let y=plaza.y0;y<=plaza.y1;y++) for (let x=plaza.x0;x<=plaza.x1;x++){
+      if (hsh(x,y)%9===0) continue;  // parterres de hierba entre el adoquín
+      pave(x, y);
+    }
+
+    // gimnasio presidiendo la plaza, con farolas flanqueando la puerta
+    const g = gymHouses.find(h => h.key === t.gym);
+    if (g){
+      putHouse(g);
+      paveWalk(g.x+2, g.y+8, t.cx, plaza.y0);
+      putLamp(g.x+1, g.y+8);
+      putLamp(g.x+4, g.y+8);
+    }
+    // servicios repartidos: [tag, tipo de puerta, dx, dy] desde el centro
+    (t.build || []).forEach(([tag, doorType, dx, dy], i) => {
+      const spr = tag === "casa" ? "house" : (i % 2 ? "barn" : "houseG");
+      const bx = t.cx + dx, by = t.cy + dy;
+      putBuilding(bx, by, spr, doorType, tag);
+      paveWalk(bx+2, by+8, dx < 0 ? plaza.x0 : plaza.x1, t.cy);
+    });
+    // casas de vecinos, sin puerta: dan volumen para que no sea una plaza pelada
+    (t.houses || []).forEach(([dx, dy], i) => {
+      putBuilding(t.cx + dx, t.cy + dy, TOWN_HOUSE_SPRITES[(i + t.cx) % 3], null, null);
+    });
+    /* Toque propio de cada pueblo: sin esto los siete salían calcados. La
+       pieza va apartada del eje de la calzada para no cortar el paso. */
+    const fx = t.cx + 3, fy = t.cy;
+    const freeSpot = (x, y, w, h) => {
+      for (let j=0;j<h;j++) for (let i=0;i<w;i++)
+        if (solid[y+j]?.[x+i] || decor[y+j]?.[x+i] || meta[y+j]?.[x+i]) return false;
+      return true;
+    };
+    if (t.plaza === "fuente" && freeSpot(fx, fy, 3, 3)){
+      decor[fy][fx] = { sprite:"fountain" };
+      for (let j=0;j<3;j++) for (let i=0;i<3;i++) solid[fy+j][fx+i] = true;
+    } else if (t.plaza === "jardin"){
+      for (let j=0;j<3;j++) for (let i=0;i<5;i++){
+        const x = fx+i-1, y = fy+j;
+        if (ground[y]?.[x] === "path" && !solid[y][x]) ground[y][x] = (i+j)%2 ? "flower2" : "flower3";
+      }
+    }
+    // farolas en las esquinas de la plaza
+    [[plaza.x0+1, plaza.y0+1], [plaza.x1-1, plaza.y0+1],
+     [plaza.x0+1, plaza.y1-1], [plaza.x1-1, plaza.y1-1]].forEach(([x,y]) => putLamp(x, y));
+
+    // letrero de entrada, junto al camino que llega del sur
+    const sx = t.cx - 3, sy = plaza.y1 + 2;
+    if (!solid[sy]?.[sx] && !decor[sy]?.[sx] && !meta[sy]?.[sx]){
+      decor[sy][sx] = { sprite:"townSign", text:t.name };
+      solid[sy][sx] = true;
+    }
+  }
 
   // ---------- Overworld NPCs (wander around home) ----------
   const npcsOver = [
     {
-      key:"abuela", name:"할머니 (Abuela)", x:33, y:25, dir:0, tint:"#a259ff", hair:"gray", long:true, wander:true,
+      key:"abuela", name:"할머니 (Abuela)", x:24, y:27, dir:0, tint:"#a259ff", hair:"gray", long:true, wander:true,
       lines:[
         { ko:"안녕하세요! 반가워요.", rom:"annyeonghaseyo! bangawoyo.", es:"¡Hola! Encantada de verte." },
         { ko:"한국어 공부는 재미있어요?", rom:"hangugeo gongbuneun jaemiisseoyo?", es:"¿Es divertido estudiar coreano?" },
@@ -36,7 +183,7 @@ const World = (() => {
       ]
     },
     {
-      key:"nino", name:"아이 (Niño)", x:24, y:21, dir:0, tint:"#06d6a0", hair:"black", wander:true,
+      key:"nino", name:"아이 (Niño)", x:44, y:28, dir:0, tint:"#06d6a0", hair:"black", wander:true,
       lines:[
         { ko:"저는 학생이에요.", rom:"jeoneun haksaeng-ieyo.", es:"Yo soy estudiante." },
         { ko:"너는 이름이 뭐예요?", rom:"neoneun ireumi mwoyeyo?", es:"¿Cómo te llamas?" },
@@ -44,7 +191,7 @@ const World = (() => {
       ]
     },
     {
-      key:"vendedor", name:"상인 (Vendedor)", x:31, y:47, dir:0, tint:"#f4a261", wander:true,
+      key:"vendedor", name:"상인 (Vendedor)", x:70, y:27, dir:0, tint:"#f4a261", wander:true,
       lines:[
         { ko:"어서 오세요!", rom:"eoseo oseyo!", es:"¡Bienvenido!" },
         { ko:"이거 얼마예요? 천 원이에요.", rom:"igeo eolmayeyo? cheon won-ieyo.", es:"¿Cuánto cuesta esto? Son mil wones." },
@@ -52,7 +199,7 @@ const World = (() => {
       ]
     },
     {
-      key:"pescador", name:"낚시꾼 (Pescador)", x:16, y:57, dir:0, tint:"#3fa9f5", hair:"black", wander:false,
+      key:"pescador", name:"낚시꾼 (Pescador)", x:62, y:84, dir:0, tint:"#3fa9f5", hair:"black", wander:false,
       lines:[
         { ko:"물고기를 좋아해요?", rom:"mulgogireul joahaeyo?", es:"¿Te gustan los peces?" },
         { ko:"이 호수에는 물고기가 많아요.", rom:"i hosueneun mulgogiga manayo.", es:"En este lago hay muchos peces." },
@@ -60,7 +207,7 @@ const World = (() => {
       ]
     },
     {
-      key:"monje", name:"스님 (Monje)", x:58, y:49, dir:0, tint:"#8d6e63", hair:"bald", wander:true,
+      key:"monje", name:"스님 (Monje)", x:74, y:45, dir:0, tint:"#8d6e63", hair:"bald", wander:true,
       lines:[
         { ko:"천천히 하세요.", rom:"cheoncheonhi haseyo.", es:"Hazlo despacio (con calma)." },
         { ko:"매일 조금씩 공부하세요.", rom:"maeil jogeumssik gongbuhaseyo.", es:"Estudia un poco cada día." },
@@ -68,7 +215,7 @@ const World = (() => {
       ]
     },
     {
-      key:"guardia", name:"경비원 (Guardia)", x:75, y:10, dir:0, tint:"#e63946", hair:"black", wander:false,
+      key:"guardia", name:"경비원 (Guardia)", x:82, y:43, dir:0, tint:"#e63946", hair:"black", wander:false,
       lines:[
         { ko:"이 동굴 안에 마스터 체육관이 있어요.", rom:"i donggul ane maseuteo cheyukgwani isseoyo.", es:"Dentro de esta cueva está el Gimnasio Maestro." },
         { ko:"메달 일곱 개가 필요해요!", rom:"medal ilgop gaega piryohaeyo!", es:"¡Necesitas siete medallas!" },
@@ -76,7 +223,7 @@ const World = (() => {
       ]
     },
     {
-      key:"granjero", name:"농부 (Granjero)", x:45, y:12, dir:0, tint:"#90be6d", hair:"blond", wander:true,
+      key:"granjero", name:"농부 (Granjero)", x:48, y:26, dir:0, tint:"#90be6d", hair:"blond", wander:true,
       lines:[
         { ko:"오늘 날씨가 좋아요!", rom:"oneul nalssiga joayo!", es:"¡Hoy hace buen tiempo!" },
         { ko:"저는 밭에서 일해요.", rom:"jeoneun bateseo ilhaeyo.", es:"Yo trabajo en el campo." },
@@ -84,11 +231,43 @@ const World = (() => {
       ]
     },
     {
-      key:"fan", name:"팬 (Fan de K-pop)", x:66, y:56, dir:0, tint:"#ff70a6", hair:"pink", long:true, wander:true,
+      key:"fan", name:"팬 (Fan de K-pop)", x:104, y:50, dir:0, tint:"#ff70a6", hair:"pink", long:true, wander:true,
       lines:[
         { ko:"음악을 좋아해요?", rom:"eumageul joahaeyo?", es:"¿Te gusta la música?" },
         { ko:"콘서트에 가고 싶어요!", rom:"konseoteue gago sipeoyo!", es:"¡Quiero ir a un concierto!" },
         { ko:"같이 노래해요!", rom:"gachi noraehaeyo!", es:"¡Cantemos juntos!" },
+      ]
+    },
+    // Vecinos que antes vivían en el mapa interior del pueblo: ahora reparten
+    // por la región, cada uno en la plaza del pueblo que le corresponde.
+    {
+      key:"vecina", name:"이웃 (Vecina)", x:26, y:18, dir:0, tint:"#7fd8ff", hair:"black", long:true, wander:true,
+      lines:[
+        { ko:"우리 마을에 온 걸 환영해요!", rom:"uri maeure on geol hwanyeonghaeyo!", es:"¡Bienvenida a nuestro pueblo!" },
+        { ko:"시청에서 알칼데사를 만나세요.", rom:"sicheongeseo alkaldesareul mannaseyo.", es:"Habla con la alcaldesa en el ayuntamiento." },
+      ]
+    },
+    {
+      key:"ninoPueblo", name:"소년 (Niño)", x:118, y:18, dir:0, tint:"#06d6a0", hair:"black", wander:true,
+      lines:[
+        { ko:"학원에서 한국어를 배워요.", rom:"hagwoneseo hangugeoreul baewoyo.", es:"En la academia se aprende coreano." },
+        { ko:"재미있어요!", rom:"jaemiisseoyo!", es:"¡Es divertido!" },
+      ]
+    },
+    {
+      key:"abueloPueblo", name:"할아버지 (Abuelo)", x:26, y:60, dir:0, tint:"#c8a27a", hair:"gray", wander:false,
+      lines:[
+        { ko:"천천히 걸으세요.", rom:"cheoncheonhi georeuseyo.", es:"Camina con calma." },
+        { ko:"길이 길어요… 좋은 여행 되세요.", rom:"giri gireoyo... joeun yeohaeng doeseyo.", es:"El camino es largo… buen viaje." },
+      ]
+    },
+    // la rival de pronunciación, junto al norebang de Pueblo Dongsa
+    {
+      key:"rival", name:"리나 (Rina, rival)", x:100, y:48, dir:0, tint:"#b14aed", hair:"pink", long:true,
+      wander:false, action:"duel", actionLabel:"🎤 ¡duelo de pronunciación!",
+      lines:[
+        { ko:"내 발음이 제일 좋아!", rom:"nae bareumi jeil joa!", es:"¡Mi pronunciación es la mejor!" },
+        { ko:"나랑 대결할래?", rom:"narang daegyeolhallae?", es:"¿Quieres un duelo conmigo?" },
       ]
     },
   ];
@@ -135,110 +314,108 @@ const World = (() => {
       if (x<2 || y<2 || x>=MW-2 || y>=MH-2) solid[y][x]=true;
     }
     for (let x=0;x<MW-1;x+=3) putTree(x,0);
-    for (let y=3;y<52;y+=3){ putTree(0,y); putTree(MW-2,y); }
+    for (let y=3;y<REGION.coastY-14;y+=3){ putTree(0,y); putTree(MW-2,y); }
 
     // BIOMA COSTA (sur): mar abierto + playa ancha, con la orilla ondulada
     // (una costa recta delataba la rejilla; así entra y sale como una bahía)
-    const coastAt = x => 62 + Math.round(1.8*Math.sin(x*0.21) + 1.2*Math.sin(x*0.55 + 1.7));
+    const coastAt = x => REGION.coastY + Math.round(1.8*Math.sin(x*0.21) + 1.2*Math.sin(x*0.55 + 1.7));
     for (let x=0;x<MW;x++){
       const cy = coastAt(x);
       for (let y=cy;y<MH;y++){ ground[y][x]="water"; solid[y][x]=true; }
-      for (let y=cy-8;y<cy;y++){
+      for (let y=cy-REGION.beach;y<cy;y++){
         if (y < 2 || y >= MH) continue;
         if (!solid[y][x] && ground[y][x]!=="water") ground[y][x]="sand";
       }
     }
 
-    // río (x 48-50) que baja hasta el mar
-    for (let y=2;y<62;y++) for (let x=48;x<51;x++){ ground[y][x]="water"; solid[y][x]=true; }
+    // RÍO: baja de norte a sur y parte la región; solo se cruza por los
+    // puentes de las carreteras horizontales
+    const rx = REGION.riverX;
+    for (let y=2;y<REGION.coastY;y++) for (let x=rx;x<rx+3;x++){ ground[y][x]="water"; solid[y][x]=true; }
 
     // lago de la pradera (esquinas mordidas para que no parezca una piscina)
-    for (let y=28;y<34;y++) for (let x=14;x<21;x++){
-      const edgeX = (x===14 || x===20), edgeY = (y===28 || y===33);
+    const lake = { x:40, y:36, w:11, h:8 };
+    for (let y=lake.y;y<lake.y+lake.h;y++) for (let x=lake.x;x<lake.x+lake.w;x++){
+      const edgeX = (x===lake.x || x===lake.x+lake.w-1), edgeY = (y===lake.y || y===lake.y+lake.h-1);
       if (edgeX && edgeY) continue;
       ground[y][x]="water"; solid[y][x]=true;
     }
-    [[15,28],[19,33],[14,31],[20,29]].forEach(([x,y]) => { ground[y][x]="grass"; solid[y][x]=false; });
+    [[lake.x+1,lake.y],[lake.x+lake.w-2,lake.y+lake.h-1],[lake.x,lake.y+3],[lake.x+lake.w-1,lake.y+2]]
+      .forEach(([x,y]) => { ground[y][x]="grass"; solid[y][x]=false; });
 
-    // caminos (blob autotile)
-    const pathH = (y) => { for (let x=2;x<MW-2;x++){ if (!solid[y][x]) ground[y][x]="path"; if (!solid[y+1][x]) ground[y+1][x]="path"; } };
-    const pathV = (x,y0,y1) => { for (let y=y0;y<y1;y++){ if (!solid[y][x]) ground[y][x]="path"; if (!solid[y][x+1]) ground[y][x+1]="path"; } };
-    pathH(20); pathH(46);
-    pathV(30,2,54); pathV(62,2,54);
-    // puentes de madera sobre el río (E-O)
-    [20, 46].forEach(cy => {
-      for (let x=48;x<=50;x++){
+    // CARRETERAS: la malla que une los pueblos (2 tiles de ancho)
+    const pathH = (y,x0,x1) => { for (let x=x0;x<=x1;x++){ if (!solid[y]?.[x]) ground[y][x]="path"; if (!solid[y+1]?.[x]) ground[y+1][x]="path"; } };
+    const pathV = (x,y0,y1) => { for (let y=y0;y<=y1;y++){ if (!solid[y]?.[x]) ground[y][x]="path"; if (!solid[y]?.[x+1]) ground[y][x+1]="path"; } };
+    REGION.roadsH.forEach(y => pathH(y, REGION.roadFromX, REGION.roadToX));
+    REGION.roadsV.forEach(x => pathV(x, REGION.roadFromY, REGION.roadToY));
+    // puentes de madera donde cada horizontal cruza el río
+    REGION.roadsH.forEach(cy => {
+      for (let x=rx;x<rx+3;x++){
         ground[cy-1][x]="briT"; ground[cy][x]="briM"; ground[cy+1][x]="briB";
         solid[cy-1][x]=false; solid[cy][x]=false; solid[cy+1][x]=false;
       }
     });
 
-    // árboles dispersos por la pradera y la costa alta
-    [[8,14],[20,10],[26,16],[40,10],[14,22],[24,26],[40,30],[10,42],[24,43],[42,40],
-     [6,30],[34,36],[44,22],[18,34],[36,16],[6,50],[26,50],[44,50],[56,38],[70,42],
-     [86,43],[90,34],[56,50],[80,50],[12,50]]
-      .forEach(([x,y]) => putTree(x,y));
+    // PUEBLOS: plaza, gimnasio, servicios, casas de vecinos y letrero.
+    // Van antes que los árboles para que el bosque no invada las calles.
+    TOWNS.forEach(buildTown);
 
-    // BIOMA BOSQUE (NE): denso, con claro hacia la cueva y corredores en los caminos
-    for (let fy=3; fy<32; fy+=4){
-      for (let fx=56; fx<92; fx+=5){
-        const jx = fx + (Math.random()*3|0), jy = fy + (Math.random()*2|0);
-        if (jx>=72 && jx<=84 && jy<=20) continue;       // claro de la cueva
-        if (jy>=18 && jy<=21) continue;                 // corredor del camino y=20
-        if (jx>=60 && jx<=63) continue;                 // corredor del camino x=62
-        if (decor[jy]?.[jx]) continue;
-        putTree(jx,jy);
+    /* BOSQUES: se siembran comprobando la huella del árbol, así nunca tapan
+       una carretera ni un pueblo (antes había que ir esquivando a mano con
+       corredores codificados). */
+    FORESTS.forEach(f => {
+      for (let fy=f.y; fy<f.y+f.h; fy+=4) for (let fx=f.x; fx<f.x+f.w; fx+=5){
+        putTree(fx + (Math.random()*3|0), fy + (Math.random()*2|0));
       }
+    });
+    // arboledas sueltas por la pradera, en cuadrícula desperdigada
+    for (let y=6; y<REGION.coastY-12; y+=7) for (let x=6; x<MW-8; x+=9){
+      if (Math.random() < 0.45) putTree(x + (Math.random()*4|0), y + (Math.random()*3|0));
     }
-    // matas entre los árboles del bosque
-    for (let i=0;i<40;i++){
-      const x = 56 + (Math.random()*36|0), y = 3 + (Math.random()*29|0);
+
+    // matas de hierba alta repartidas por los descampados
+    for (let i=0;i<90;i++){
+      const x = 4 + (Math.random()*(MW-10)|0), y = 4 + (Math.random()*(REGION.coastY-10)|0);
+      if (inTown(x, y)) continue;
       if (!solid[y]?.[x] && !meta[y]?.[x] && !decor[y]?.[x] && ground[y][x]==="grass") ground[y][x]="tallgrass";
     }
-    // matas dispersas en pradera/costa
-    for (let i=0;i<30;i++){
-      const x = 4 + (Math.random()*44|0), y = 4 + (Math.random()*48|0);
-      if (!solid[y]?.[x] && !meta[y]?.[x] && !decor[y]?.[x] && ground[y][x]==="grass") ground[y][x]="tallgrass";
+
+    // Entrada a la CUEVA (claro del bosque profundo, entre las rutas 5 y 7)
+    putCaveEntrance(78, 40);
+
+    // MUELLE DE PESCA: sale del Puerto Topik hacia mar abierto
+    const port = TOWNS.find(t => t.gym === "topik1");
+    const pierX = port.cx - 1;
+    for (let y=REGION.coastY-8; y<=REGION.coastY+6; y++){
+      if (y >= MH) break;
+      ground[y][pierX]="pierL"; ground[y][pierX+1]="pierM"; ground[y][pierX+2]="pierR";
+      [pierX,pierX+1,pierX+2].forEach(x => { solid[y][x]=false; meta[y][x]=null; });
     }
+    meta[REGION.coastY+6][pierX+1] = { type:"fishspot" };
 
-    gymHouses.forEach(g => putHouse(g));
+    // CASA DEL MAR (asset 3D en la playa oeste; el modelo se añade en
+    // buildSeaHouse — aquí solo reservamos su huella sólida)
+    for (let y=SEA_HOUSE_AT.y-3;y<=SEA_HOUSE_AT.y+3;y++)
+      for (let x=SEA_HOUSE_AT.x-3;x<=SEA_HOUSE_AT.x+3;x++){ solid[y][x]=true; meta[y][x]=null; }
 
-    // TIENDA (junto al cruce de caminos)
-    putShop(38, 12);
-
-    // CASA DE KAROL (base, en la pradera noroeste)
-    putHome(18, 10);
-
-    // Entrada a la CUEVA (claro del bosque, NE)
-    putCaveEntrance(76, 6);
-
-    // PUERTA DEL PUEBLO (arco al oeste, sobre el camino y=20)
-    decor[18][3] = { sprite:"caveDoor", pueblo:true };
-    for (let dy=0;dy<2;dy++) for (let dx=0;dx<4;dx++){
-      if (solid[18+dy]?.[3+dx] === undefined) continue;
-      solid[18+dy][3+dx]=true; meta[18+dy][3+dx]=null;
+    // CORRAL del granjero (cerca con animales, en la pradera central)
+    const corral = { x:44, y:18, w:7, h:6 };
+    for (let x=corral.x;x<corral.x+corral.w;x++){
+      ground[corral.y][x] = x===corral.x?"fenceTL":(x===corral.x+corral.w-1?"fenceTR":"fenceH");
+      solid[corral.y][x]=true;
+      if (x === corral.x+3) continue; // portillo
+      ground[corral.y+corral.h][x] = x===corral.x?"fenceBL":(x===corral.x+corral.w-1?"fenceBR":"fenceH");
+      solid[corral.y+corral.h][x]=true;
     }
-    [4,5].forEach(x => { solid[19][x]=false; meta[19][x]={type:"pueblodoor"}; });
-
-    // MUELLE DE PESCA (puente vertical hacia el mar, 3 tiles de ancho)
-    for (let y=59;y<=66;y++){
-      ground[y][23]="pierL"; ground[y][24]="pierM"; ground[y][25]="pierR";
-      [23,24,25].forEach(x => { solid[y][x]=false; meta[y][x]=null; });
+    for (let y=corral.y+1;y<corral.y+corral.h;y++){
+      ground[y][corral.x]="fenceV"; solid[y][corral.x]=true;
+      ground[y][corral.x+corral.w-1]="fenceV"; solid[y][corral.x+corral.w-1]=true;
     }
-    meta[66][24] = { type:"fishspot" };
-
-    // CASA DEL MAR (asset 3D en la playa, al este del muelle; el modelo 3D
-    // se añade en buildSeaHouse — aquí solo reservamos su huella sólida)
-    for (let y=55;y<=61;y++) for (let x=27;x<=33;x++){ solid[y][x]=true; meta[y][x]=null; }
-
-    // CORRAL del granjero (cerca con animales)
-    for (let x=42;x<=48;x++){ ground[9][x] = x===42?"fenceTL":(x===48?"fenceTR":"fenceH"); solid[9][x]=true; }
-    for (let x=42;x<=48;x++){ if (x===45) continue; ground[14][x] = x===42?"fenceBL":(x===48?"fenceBR":"fenceH"); solid[14][x]=true; }
-    for (let y=10;y<14;y++){ ground[y][42]="fenceV"; solid[y][42]=true; ground[y][48]="fenceV"; solid[y][48]=true; }
     spawnAnimals();
 
     // COFRES escondidos (monedas)
-    [[6,6,"c1"],[90,50,"c2"],[68,32,"c3"],[8,58,"c4"],[90,8,"c5"]].forEach(([x,y,id]) => {
+    [[8,8,"c1"],[124,60,"c2"],[76,34,"c3"],[10,86,"c4"],[124,8,"c5"],
+     [52,48,"c6"],[96,88,"c7"]].forEach(([x,y,id]) => {
       if (solid[y]?.[x] || meta[y]?.[x] || decor[y]?.[x]) return;
       const s = State.get();
       if ((s.chests||[]).includes(id)) return;
@@ -254,43 +431,209 @@ const World = (() => {
       ground[y][x] = (g==="sand") ? "bushSand" : "bush";
       meta[y][x]={type:"bush",biome};
     };
-    for (let i=0;i<26;i++) tryBush("pradera", 4+(Math.random()*44|0), 4+(Math.random()*46|0));
-    for (let i=0;i<20;i++) tryBush("bosque", 54+(Math.random()*38|0), 3+(Math.random()*30|0));
-    for (let i=0;i<18;i++) tryBush("costa", 3+(Math.random()*90|0), 54+(Math.random()*8|0));
+    for (let i=0;i<40;i++) tryBush("pradera", 6+(Math.random()*54|0), 6+(Math.random()*66|0));
+    for (let i=0;i<30;i++) tryBush("bosque", 66+(Math.random()*44|0), 26+(Math.random()*50|0));
+    for (let i=0;i<24;i++) tryBush("costa", 6+(Math.random()*(MW-14)|0), REGION.coastY-9+(Math.random()*8|0));
 
-    npcsCur = npcsOver;
-    npcsCur.forEach(n => { solid[n.y][n.x]=true; meta[n.y][n.x]={type:"npc",npc:n}; });
+    /* Los NPCs llevan coordenadas escritas a mano, y mover un pueblo o una
+       carretera puede dejar a alguno dentro de una casa o en el agua. En vez
+       de cuadrar los números a ojo cada vez, se busca la casilla libre más
+       cercana: el NPC se corre lo justo y nunca queda inalcanzable. */
+    const relocate = (n) => {
+      const free = (x, y) => ground[y]?.[x] !== undefined && !solid[y][x] &&
+        !decor[y][x] && !meta[y][x] && ground[y][x] !== "water";
+      if (free(n.x, n.y)) return;
+      for (let r=1; r<=12; r++){
+        for (let dy=-r; dy<=r; dy++) for (let dx=-r; dx<=r; dx++){
+          if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+          const nx = n.x+dx, ny = n.y+dy;
+          if (!free(nx, ny)) continue;
+          n.x = n.tx = nx; n.y = n.ty = ny;
+          n.px = nx*TILE; n.py = ny*TILE;
+          return;
+        }
+      }
+    };
+    /* Se les guarda la posición en coordenadas de la región (gx/gy); cada
+       zona traduce después a las suyas al cargarse. */
+    npcsOver.forEach(n => { relocate(n); n.gx = n.x; n.gy = n.y; });
 
+    // HIERBA ALTA de encuentros: a lo largo de las rutas, para que el viaje
+    // entre pueblos sea donde aparecen las palabras salvajes
     grassPatches = [
-      { x:16, y:4,  w:8, h:4, pool: Data.routes[0].pool },  // NO (hangul)
-      { x:38, y:5,  w:7, h:4, pool: Data.routes[1].pool },  // N (numeros)
-      { x:86, y:26, w:6, h:5, pool: Data.routes[2].pool },  // E bosque (verbos)
-      { x:66, y:44, w:7, h:4, pool: Data.routes[3].pool },  // SE (honor)
-      { x:20, y:48, w:8, h:4, pool: Data.routes[4].pool },  // S (topik1)
-      { x:4,  y:20, w:5, h:7, pool: Data.routes[5].pool },  // O (topik2)
-      { x:36, y:32, w:6, h:5, pool: Data.routes[2].pool },  // centro
-      { x:54, y:34, w:6, h:4, pool: Data.routes[1].pool },  // centro-este
-      { x:8,  y:44, w:7, h:3, pool: Data.routes[5].pool },  // SO
-      { x:76, y:14, w:6, h:4, pool: Data.routes[3].pool },  // claro de la cueva
+      { x:16, y:20, w:9,  h:5, pool: Data.routes[0].pool },  // Ruta 1
+      { x:34, y:30, w:10, h:5, pool: Data.routes[0].pool },  // Ruta 2
+      { x:76, y:22, w:8,  h:6, pool: Data.routes[1].pool },  // Ruta 3
+      { x:96, y:30, w:9,  h:5, pool: Data.routes[1].pool },  // Ruta 3 este
+      { x:16, y:36, w:8,  h:6, pool: Data.routes[2].pool },  // Ruta 4
+      { x:34, y:52, w:10, h:5, pool: Data.routes[2].pool },  // Ruta 5
+      { x:70, y:60, w:9,  h:6, pool: Data.routes[3].pool },  // Ruta 7 bosque
+      { x:96, y:60, w:9,  h:5, pool: Data.routes[3].pool },  // Ruta 9
+      { x:34, y:74, w:10, h:5, pool: Data.routes[4].pool },  // Ruta 8 oeste
+      { x:78, y:82, w:9,  h:5, pool: Data.routes[4].pool },  // Ruta 8 este
+      { x:16, y:66, w:8,  h:5, pool: Data.routes[5].pool },  // suroeste
+      { x:72, y:36, w:8,  h:6, pool: Data.routes[5].pool },  // claro de la cueva
     ];
+    /* La hierba alta crece AL LADO del camino, nunca encima: pintarla sobre
+       la calzada no solo quedaba raro, es que borraba el "path" y con él los
+       pasos que comunican unas zonas con otras. */
+    const SOWABLE = ["grass","flower","flower2","flower3","tuft","mush"];
     grassPatches.forEach(p => {
       for (let y=p.y;y<p.y+p.h;y++) for (let x=p.x;x<p.x+p.w;x++){
-        if (!solid[y]?.[x] && !meta[y]?.[x]) { ground[y][x]="tallgrass"; meta[y][x]={type:"grass",pool:p.pool}; }
+        if (inTown(x, y)) continue;   // los encuentros son de ruta, no de plaza
+        if (solid[y]?.[x] || meta[y]?.[x] || decor[y]?.[x]) continue;
+        if (!SOWABLE.includes(ground[y][x])) continue;
+        ground[y][x]="tallgrass"; meta[y][x]={type:"grass",pool:p.pool};
       }
     });
 
-    spawnButterflies();
+    // El mapa maestro queda listo; a partir de aquí el juego solo carga una
+    // zona cada vez (ver loadZone).
+    region = { W:MW, H:MH, ground, solid, meta, decor, npcs: npcsOver };
     mode = "over";
+    const gp = State.get().playerPos;
+    const gx = Number.isFinite(gp?.gx) ? gp.gx : START.x;
+    const gy = Number.isFinite(gp?.gy) ? gp.gy : START.y;
+    const z = zoneAt(gx, gy);
+    loadZone(z.i, z.j, gx, gy);
+  }
+
+  /* ==========================================================
+     ZONAS
+     La región se genera entera, pero nunca se juega entera: se recorta en
+     una rejilla de zonas y solo vive en memoria la que pisas. Para pasar a
+     la siguiente hay que salir por la carretera que cruza el borde, como en
+     Pokémon. Los cortes caen justo entre las carreteras de la malla, así
+     que cada frontera tiene exactamente un paso.
+     ========================================================== */
+  const ZONE_COLS = [0, 44, 88, 132];
+  const ZONE_ROWS = [0, 36, 70, 104];
+  const ZONE_NAMES = [
+    ["Pueblo Hangul",  "Pueblo Sutja",  "Pueblo Josa"],
+    ["Pueblo Topik",   "Valle del Lago", "Pueblo Dongsa"],
+    ["Bosque del Sur", "Puerto Topik",  "Pueblo Jondae"],
+  ];
+  const ZONE_KO = [
+    ["한글 마을", "숫자 마을", "조사 마을"],
+    ["토픽 마을", "호수 골짜기", "동사 마을"],
+    ["남쪽 숲",   "토픽 항구", "존경 마을"],
+  ];
+  const START = { x:20, y:20 };   // plaza de Pueblo Hangul
+
+  let region = null;              // mapa maestro completo
+  let curZone = { i:0, j:0 };     // zona cargada
+  let zoneX0 = 0, zoneY0 = 0;     // su esquina en coordenadas de la región
+
+  const zoneAt = (gx, gy) => {
+    let i = 0, j = 0;
+    while (i < 2 && gx >= ZONE_COLS[i+1]) i++;
+    while (j < 2 && gy >= ZONE_ROWS[j+1]) j++;
+    return { i, j };
+  };
+  const toGlobal = (x, y) => ({ x: x + zoneX0, y: y + zoneY0 });
+
+  /* Carga una zona: recorta el maestro, sella el contorno con arboledas y
+     abre paso solo por donde cruza una carretera. */
+  function loadZone(i, j, gx, gy){
+    curZone = { i, j };
+    zoneX0 = ZONE_COLS[i]; zoneY0 = ZONE_ROWS[j];
+    const W = ZONE_COLS[i+1] - zoneX0, H = ZONE_ROWS[j+1] - zoneY0;
+    MW = W; MH = H;
+    const taken = State.get().chests || [];
+    ground=[]; solid=[]; meta=[]; decor=[];
+    for (let y=0;y<H;y++){
+      ground[y] = region.ground[zoneY0+y].slice(zoneX0, zoneX0+W);
+      solid[y]  = region.solid[zoneY0+y].slice(zoneX0, zoneX0+W);
+      decor[y]  = region.decor[zoneY0+y].slice(zoneX0, zoneX0+W);
+      meta[y]   = region.meta[zoneY0+y].slice(zoneX0, zoneX0+W).map(m => {
+        // los cofres ya abiertos no reaparecen al volver a entrar en la zona
+        if (m && m.type === "chest" && taken.includes(m.id)) return null;
+        return m;
+      });
+      for (let x=0;x<W;x++) if (meta[y][x] === null && ground[y][x] === "chest") ground[y][x] = "grass";
+    }
+
+    /* Arboleda de cierre pegada al contorno, para que el límite de la zona sea
+       un bosque y no una pared invisible. Va ANTES de sellar el borde: la
+       huella del árbol incluye la última fila, y putTree() se niega a plantar
+       sobre casilla sólida, así que sellando primero no crecía ni uno.
+       Como también se niega sobre camino, los pasos quedan despejados solos. */
+    for (let x=0;x<W-3;x+=2){ putTree(x, 0); putTree(x, H-5); }
+    for (let y=0;y<H-5;y+=3){ putTree(0, y); putTree(W-3, y); }
+
+    // contorno: sólido salvo donde la carretera sale hacia una zona vecina
+    const hasNeighbour = (di, dj) => {
+      const ni = i+di, nj = j+dj;
+      return ni>=0 && nj>=0 && ni<3 && nj<3;
+    };
+    const OPEN = ["path","briT","briM","briB","pierL","pierM","pierR","sand"];
+    const edge = (x, y, di, dj) => {
+      if (hasNeighbour(di, dj) && OPEN.includes(ground[y][x]) && !decor[y][x]){
+        solid[y][x] = false;
+        meta[y][x] = { type:"zoneExit", dx:di, dy:dj };
+      } else {
+        solid[y][x] = true;
+      }
+    };
+    for (let x=0;x<W;x++){ edge(x, 0, 0, -1); edge(x, H-1, 0, 1); }
+    for (let y=0;y<H;y++){ edge(0, y, -1, 0); edge(W-1, y, 1, 0); }
+
+    // NPCs y fauna de esta zona, en coordenadas locales
+    npcsCur = region.npcs.filter(n => {
+      const inZone = n.gx >= zoneX0 && n.gx < zoneX0+W && n.gy >= zoneY0 && n.gy < zoneY0+H;
+      if (!inZone) return false;
+      n.x = n.gx - zoneX0; n.y = n.gy - zoneY0;
+      return true;
+    });
+    npcsCur.forEach(n => {
+      if (solid[n.y][n.x] || meta[n.y][n.x]) return;
+      initNpc(n);
+      solid[n.y][n.x]=true; meta[n.y][n.x]={type:"npc",npc:n};
+    });
+    spawnAnimals();
+    spawnButterflies();
+
+    // el jugador entra donde le corresponda dentro de la zona
+    const px = Math.min(W-2, Math.max(1, gx - zoneX0));
+    const py = Math.min(H-2, Math.max(1, gy - zoneY0));
+    player.x=player.tx=px; player.y=player.ty=py;
+    player.px=px*TILE; player.py=py*TILE;
+    player.moving=false;
+    petTeleport();
     sceneDirty = true;
   }
 
+  /* Cruzar una frontera: se entra dos casillas adentro para no caer sobre el
+     borde de la zona nueva y rebotar de vuelta al instante. */
+  function crossZone(dx, dy){
+    const g = toGlobal(player.x, player.y);
+    const gx = g.x + dx*2, gy = g.y + dy*2;
+    const z = zoneAt(gx, gy);
+    if (z.i === curZone.i && z.j === curZone.j) return;
+    Sfx.play("door");
+    loadZone(z.i, z.j, gx, gy);
+    announceZone();
+  }
+
+  /* Planta un árbol si cabe. El tronco bloquea un 2x3 por debajo del ancla,
+     así que hay que mirar esa huella entera: sin la comprobación, sembrar el
+     bosque tapaba carreteras y puertas, y antes se esquivaba a mano con
+     corredores codificados en las coordenadas. */
+  const TREE_FREE = ["grass","flower","flower2","flower3","tuft","mush","rock","tallgrass"];
   function putTree(x,y){
-    if (y+1>=MH || x+1>=MW) return;
+    if (y+1>=MH || x+1>=MW || x<0 || y<0) return false;
+    if (decor[y][x]) return false;
+    for (let dy=2;dy<5;dy++) for (let dx=1;dx<3;dx++){
+      const g = ground[y+dy]?.[x+dx];
+      if (g === undefined) continue;                    // fuera del mapa: no estorba
+      if (meta[y+dy][x+dx] || decor[y+dy][x+dx] || solid[y+dy][x+dx]) return false;
+      if (!TREE_FREE.includes(g)) return false;         // camino, agua, arena, puente…
+    }
     decor[y][x] = { sprite:"tree" };
-    // sólo el tronco bloquea (2x2 abajo al centro)
     for (let dy=2;dy<5;dy++) for (let dx=1;dx<3;dx++){
       if (solid[y+dy]?.[x+dx] !== undefined) solid[y+dy][x+dx]=true;
     }
+    return true;
   }
 
   function clearTreesRect(x0,y0,x1,y1){
@@ -346,6 +689,7 @@ const World = (() => {
       if (solid[y+dy] === undefined || solid[y+dy][x+dx] === undefined) continue;
       solid[y+dy][x+dx]=true; meta[y+dy][x+dx]=null;
     }
+    if (!doorType) return; // casa de vecinos: se ve, pero no se entra
     const doorX=x+2, doorY=y+7;
     solid[doorY][doorX]=false;
     meta[doorY][doorX]={type:doorType};
@@ -409,106 +753,6 @@ const World = (() => {
   }
 
   // ---------- Pueblo (마을) ----------
-  function buildPueblo(){
-    const W=34, H=24;
-    MW=W; MH=H;
-    ground=[]; solid=[]; meta=[]; decor=[];
-    for (let y=0;y<H;y++){
-      ground[y]=[]; solid[y]=[]; meta[y]=[]; decor[y]=[];
-      for (let x=0;x<W;x++){
-        const r = Math.random();
-        ground[y][x] = r<0.9 ? "grass" : (r<0.94 ? "flower" : (r<0.97 ? "tuft" : "flower2"));
-        solid[y][x]=false; meta[y][x]=null; decor[y][x]=null;
-      }
-    }
-    // borde con árboles
-    for (let y=0;y<H;y++) for (let x=0;x<W;x++){
-      if (x<2 || y<2 || x>=W-2 || y>=H-2) solid[y][x]=true;
-    }
-    for (let x=0;x<W-1;x+=3){ if (x<15 || x>19) putTree(x,H-4); }
-    for (let y=2;y<H-4;y+=4){ putTree(0,y); putTree(W-4,y); }
-
-    // calle principal (cruz) + plaza con fuente
-    for (let x=2;x<W-2;x++){ ground[15][x]="path"; ground[16][x]="path"; }
-    for (let y=8;y<H-2;y++){ ground[y][16]="path"; ground[y][17]="path"; }
-    for (let y=12;y<19;y++) for (let x=13;x<21;x++) ground[y][x]="path";
-    decor[12][15] = { sprite:"fountain" };
-    for (let dy=0;dy<3;dy++) for (let dx=0;dx<3;dx++) solid[12+dy][15+dx]=true;
-    decor[10][12] = { sprite:"lamp" };  solid[12][12]=true;
-    decor[10][21] = { sprite:"lamp" };  solid[12][21]=true;
-
-    const placeBuilding = (spr, x, y, doorType, extra) => {
-      decor[y][x] = Object.assign({ sprite:spr }, extra||{});
-      for (let dy=4;dy<8;dy++) for (let dx=0;dx<6;dx++){
-        if (solid[y+dy]?.[x+dx] === undefined) continue;
-        solid[y+dy][x+dx]=true; meta[y+dy][x+dx]=null;
-      }
-      if (doorType){
-        solid[y+7][x+2]=false; meta[y+7][x+2]={type:doorType};
-        if (y+8<H){ solid[y+8][x+2]=false; ground[y+8][x+2]="path"; meta[y+8][x+2]=null; }
-      }
-    };
-
-    // ALCALDÍA (norte centro)
-    placeBuilding("houseG", 14, 0, "alcaldiadoor", { alcaldia:true });
-    // CAFÉ (oeste)
-    placeBuilding("house", 4, 3, "cafedoor", { cafe:true });
-    // ACADEMIA (este)
-    placeBuilding("barn", 24, 3, "academiadoor", { academia:true });
-    // casa decorativa + NOREBANG (karaoke 노래방)
-    placeBuilding("house", 4, 15);
-    placeBuilding("barn", 24, 15, "norebangdoor", { norebang:true });
-
-    // NPCs del pueblo
-    const npcs = [];
-    npcs.push(initNpc({
-      key:"vecina", name:"이웃 (Vecina)", x:12, y:18, dir:0, tint:"#7fd8ff", hair:"black", long:true, wander:true,
-      lines:[
-        { ko:"우리 마을에 온 걸 환영해요!", rom:"uri maeure on geol hwanyeonghaeyo!", es:"¡Bienvenida a nuestro pueblo!" },
-        { ko:"카페하고 학원도 가 보세요.", rom:"kapehago hagwondo ga boseyo.", es:"Visita también el café y la academia." },
-      ]
-    }));
-    npcs.push(initNpc({
-      key:"ninoPueblo", name:"소년 (Niño)", x:21, y:18, dir:0, tint:"#06d6a0", hair:"black", wander:true,
-      lines:[
-        { ko:"학원에서 한국어를 배워요.", rom:"hagwoneseo hangugeoreul baewoyo.", es:"En la academia se aprende coreano." },
-        { ko:"재미있어요!", rom:"jaemiisseoyo!", es:"¡Es divertido!" },
-      ]
-    }));
-    npcs.push(initNpc({
-      key:"abueloPueblo", name:"할아버지 (Abuelo)", x:20, y:9, dir:0, tint:"#c8a27a", hair:"gray", wander:false,
-      lines:[
-        { ko:"천천히 걸으세요.", rom:"cheoncheonhi georeuseyo.", es:"Camina con calma." },
-        { ko:"우리 마을은 평화로워요.", rom:"uri maeureun pyeonghwarowoyo.", es:"Nuestro pueblo es tranquilo." },
-      ]
-    }));
-    // la rival de pronunciación (junto al norebang)
-    npcs.push(initNpc({
-      key:"rival", name:"리나 (Rina, rival)", x:22, y:20, dir:0, tint:"#b14aed", hair:"pink", long:true,
-      wander:false, action:"duel", actionLabel:"🎤 ¡duelo de pronunciación!",
-      lines:[
-        { ko:"내 발음이 제일 좋아!", rom:"nae bareumi jeil joa!", es:"¡Mi pronunciación es la mejor!" },
-        { ko:"나랑 대결할래?", rom:"narang daegyeolhallae?", es:"¿Quieres un duelo conmigo?" },
-      ]
-    }));
-    npcsCur = npcs;
-    npcs.forEach(n => { solid[n.y][n.x]=true; meta[n.y][n.x]={type:"npc",npc:n}; });
-
-    // salida al sur
-    [16,17].forEach(x => { ground[H-1][x]="path"; solid[H-1][x]=false; meta[H-1][x]={type:"exit"}; ground[H-2][x]="path"; solid[H-2][x]=false; });
-
-    player.x=player.tx=16; player.y=player.ty=H-2;
-    player.px=player.x*TILE; player.py=player.y*TILE;
-    player.dir=2;
-    mode="pueblo";
-    petTeleport();
-    sceneDirty = true;
-  }
-  function enterPueblo(){
-    pushMap();
-    Sfx.play("door");
-    buildPueblo();
-  }
 
   // ---------- Helper: habitación interior simple ----------
   function buildRoom(W, H, npc, modeName, floorTiles){
@@ -751,6 +995,7 @@ const World = (() => {
 
   // ---------- Interior de gimnasio ----------
   function buildInterior(gym){
+    curGymName = (gym && gym.name) ? gym.name : null;
     const W=13, H=10;
     MW=W; MH=H;
     ground=[]; solid=[]; meta=[]; decor=[];
@@ -845,9 +1090,18 @@ const World = (() => {
       frame:0, t: Math.random()*4000, next: performance.now()+1000+Math.random()*4000,
     });
     // dentro del corral del granjero
-    put("cow", 44, 11, 2); put("pig", 46, 12, 2); put("chicken", 43, 12, 2); put("sheep", 46, 10, 2);
+    /* Coordenadas de la región: solo se sueltan los animales que caen en la
+       zona cargada, ya convertidos a sus casillas locales. */
+    const here = (kind, gx, gy, r) => {
+      const x = gx - zoneX0, y = gy - zoneY0;
+      if (x < 1 || y < 1 || x >= MW-1 || y >= MH-1) return;
+      if (solid[y]?.[x] || meta[y]?.[x] || decor[y]?.[x]) return;
+      put(kind, x, y, r);
+    };
+    here("cow", 46, 20, 2); here("pig", 48, 21, 2); here("chicken", 45, 22, 2); here("sheep", 48, 19, 2);
     // libres por la pradera
-    put("sheep", 18, 26, 3); put("chicken", 26, 36, 3); put("cow", 12, 22, 3);
+    here("sheep", 34, 34, 3); here("chicken", 52, 44, 3); here("cow", 30, 46, 3);
+    here("sheep", 100, 60, 3); here("chicken", 24, 62, 3); here("cow", 70, 84, 3);
   }
   function updateAnimals(){
     if (mode!=="over") return;
@@ -883,10 +1137,9 @@ const World = (() => {
   let butterflies = [];
   function spawnButterflies(){
     butterflies = [];
+    // revolotean por el mapa cargado, sea la zona que sea
     const zones = [
-      { x:8,  y:14, w:40, h:24, n:4 },  // pradera
-      { x:8,  y:48, w:40, h:14, n:3 },  // costa
-      { x:58, y:6,  w:32, h:24, n:2 },  // bosque
+      { x:4, y:4, w:Math.max(4, MW-8), h:Math.max(4, MH-8), n:6 },
     ];
     zones.forEach(z => {
       for (let i=0;i<z.n;i++){
@@ -975,9 +1228,9 @@ const World = (() => {
 
   // ---------- Player ----------
   const player = {
-    x:30, y:21, px:30*TILE, py:21*TILE,
+    x:20, y:20, px:20*TILE, py:20*TILE,
     dir:0, frame:0, animT:0,
-    moving:false, tx:30, ty:21, speed:1.5,
+    moving:false, tx:20, ty:20, speed:1.5,
   };
   const keys = {};
   let started = false;
@@ -1033,9 +1286,17 @@ const World = (() => {
     player.tx=nx; player.ty=ny; player.moving=true;
   }
 
+  // la posición se apunta al guardar, mires donde mires (ver State.onBeforeSave)
+  if (typeof State !== "undefined" && State.onBeforeSave) State.onBeforeSave(s => {
+    if (mode !== "over" || !region) return;
+    const g = toGlobal(player.x, player.y);
+    s.playerPos = { gx:g.x, gy:g.y };
+  });
+
   function onArrive(){
     const s = State.get();
-    if (mode==="over") s.playerPos = { x:player.x, y:player.y };
+    if (mode==="over"){ const g = toGlobal(player.x, player.y); s.playerPos = { gx:g.x, gy:g.y }; }
+    announceZone();
     const m = meta[player.y][player.x];
     if (!m) return;
     if (m.type==="grass"){
@@ -1054,8 +1315,8 @@ const World = (() => {
       enterCave();
     } else if (m.type==="shopdoor"){
       enterShop();
-    } else if (m.type==="pueblodoor"){
-      enterPueblo();
+    } else if (m.type==="zoneExit"){
+      crossZone(m.dx, m.dy);
     } else if (m.type==="alcaldiadoor"){
       enterAlcaldia();
     } else if (m.type==="cafedoor"){
@@ -1110,6 +1371,113 @@ const World = (() => {
     if (!solid[player.y+1]?.[player.x]){
       player.ty=player.y+1; player.tx=player.x; player.moving=true; player.dir=0;
     }
+  }
+
+  // ---------- Zonas (banner de lugar) + minimapa ----------
+  let curGymName = null;
+  function zoneInfo(){
+    switch(mode){
+      case "cueva":    return { name:"Cueva Maestra", ko:"마스터 동굴" };
+      case "casa":     return { name:"Tu casa", ko:"우리 집" };
+      case "tienda":   return { name:"Tienda", ko:"상점" };
+      case "alcaldia": return { name:"Alcaldía", ko:"시청" };
+      case "interior": return { name:curGymName || "Gimnasio", ko:"체육관" };
+      case "cafe":     return { name:"Café", ko:"카페" };
+      case "academia": return { name:"Academia", ko:"학원" };
+      case "norebang": return { name:"Norebang", ko:"노래방" };
+    }
+    if (mode !== "over") return { name:"Interior", ko:"실내" };
+    // cada zona es un mapa con nombre propio; dentro, el pueblo manda sobre
+    // la ruta que lo atraviesa
+    const g = toGlobal(player.x, player.y);
+    for (const t of TOWNS){
+      const r = townRect(t);
+      if (g.x>=r.x && g.x<r.x+r.w && g.y>=r.y && g.y<r.y+r.h) return { name:t.name, ko:t.ko };
+    }
+    return { name: ZONE_NAMES[curZone.j][curZone.i], ko: ZONE_KO[curZone.j][curZone.i] };
+  }
+
+  let lastZoneKey = "";
+  function announceZone(){
+    const z = zoneInfo();
+    if (z.name === lastZoneKey) return;
+    lastZoneKey = z.name;
+    const el = document.getElementById("loc-banner");
+    if (el){
+      el.innerHTML = `<b>${z.name}</b>` + (z.ko ? `<span>${z.ko}</span>` : "");
+      el.classList.remove("show"); void el.offsetWidth; el.classList.add("show");
+    }
+    const mz = document.getElementById("minimap-zone");
+    if (mz) mz.textContent = z.name + (z.ko ? " · " + z.ko : "");
+  }
+
+  // ---------- Minimapa ----------
+  const MM_COLORS = {
+    grass:"#8ecb6d", flower:"#9fd77f", flower2:"#9fd77f", flower3:"#9fd77f",
+    tuft:"#8ecb6d", mush:"#a8c47a", rock:"#9a9a8a", water:"#5db8e8",
+    sand:"#f0dfa0", path:"#dbb87e", tallgrass:"#57a04b", dirtA:"#b98d5e",
+    briT:"#c99a5e", briM:"#c99a5e", briB:"#c99a5e",
+    pierL:"#c99a5e", pierM:"#c99a5e", pierR:"#c99a5e", chest:"#e8b23a",
+    bush:"#4e8f42", bushSand:"#c9bd7a", fenceH:"#a97c4a", fenceV:"#a97c4a",
+    fenceTL:"#a97c4a", fenceTR:"#a97c4a", fenceBL:"#a97c4a", fenceBR:"#a97c4a",
+    floorA:"#e8dcc0", floorB:"#e2d4b4", floorC:"#e8dcc0", floorD:"#e2d4b4",
+    rug:"#d66a7a", exitMat:"#7a5a3a",
+    wallTop:"#6a5a4a", wallFace:"#7a6a58", wallFace2:"#7a6a58",
+    caveFloorA:"#6a6270", caveFloorB:"#655d6b", caveFloorC:"#6a6270", caveFloorD:"#655d6b",
+    caveWallTop:"#3d3745", caveWallFace:"#484153", caveWallFace2:"#484153", caveRock:"#504a5c",
+  };
+  const MM_SCALE = 2;
+  let mmBase = null, mmLast = 0;
+
+  function buildMinimapBase(){
+    const cv = document.getElementById("minimap-canvas");
+    if (!cv) return;
+    const S = MM_SCALE;
+    cv.width = MW*S; cv.height = MH*S;
+    mmBase = mmBase || document.createElement("canvas");
+    mmBase.width = MW*S; mmBase.height = MH*S;
+    const c = mmBase.getContext("2d");
+    for (let y=0;y<MH;y++) for (let x=0;x<MW;x++){
+      c.fillStyle = MM_COLORS[ground[y][x]] || "#8ecb6d";
+      c.fillRect(x*S, y*S, S, S);
+    }
+    // decor: árboles, casas, cueva, fuente, letreros
+    for (let y=0;y<MH;y++) for (let x=0;x<MW;x++){
+      const d = decor[y][x];
+      if (!d) continue;
+      if (d.sprite === "tree"){ c.fillStyle="#3f7a36"; c.fillRect((x+1)*S, (y+2)*S, S*3, S*3); }
+      else if (HOUSE_VARIANT[d.sprite]){ c.fillStyle="#a8622e"; c.fillRect(x*S, (y+4)*S, S*6, S*4); }
+      else if (d.sprite === "caveDoor"){ c.fillStyle="#3d3745"; c.fillRect(x*S, y*S, S*4, S*2); }
+      else if (d.sprite === "fountain"){ c.fillStyle="#7fd8ff"; c.fillRect(x*S, y*S, S*3, S*3); }
+      else if (d.sprite === "townSign"){ c.fillStyle="#fffdf4"; c.fillRect(x*S, y*S, S, S); }
+    }
+    // marcas fijas del overworld: gimnasios
+    if (mode === "over"){
+      const s = State.get();
+      gymHouses.forEach(g => {
+        const has = s.badges.includes(g.key);
+        c.fillStyle = has ? "#ffb400" : "#e63946";
+        c.strokeStyle = "#33314e"; c.lineWidth = 1;
+        c.beginPath(); c.arc((g.x+3)*S, (g.y+5)*S, 3, 0, 7); c.fill(); c.stroke();
+      });
+    }
+  }
+
+  function drawMinimap(){
+    const cv = document.getElementById("minimap-canvas");
+    if (!cv || !mmBase) return;
+    const now = performance.now();
+    if (now - mmLast < 100) return;
+    mmLast = now;
+    const S = MM_SCALE, c = cv.getContext("2d");
+    c.drawImage(mmBase, 0, 0);
+    // jugador: anillo blanco + punto rojo (parpadeo suave)
+    const px = (player.px/TILE + 0.5) * S, py = (player.py/TILE + 0.5) * S;
+    const pulse = 3 + Math.sin(now*0.006)*0.6;
+    c.fillStyle = "#fff";
+    c.beginPath(); c.arc(px, py, pulse+1.4, 0, 7); c.fill();
+    c.fillStyle = "#e63946";
+    c.beginPath(); c.arc(px, py, pulse, 0, 7); c.fill();
   }
 
   // ---------- NPC wandering ----------
@@ -1993,6 +2361,11 @@ const World = (() => {
         const l = Paper.lampMesh();
         l.position.set(x+0.5, 0, y+2.2);
         worldGroup.add(l);
+      } else if (d.sprite === "townSign"){
+        const sp = Paper.signpostMesh();
+        sp.position.set(x+0.5, 0, y+0.5);
+        worldGroup.add(sp);
+        addLabel(d.text, x+0.5, 1.85, y+0.5, { fg:"#8a5a2b" });
       }
     }
 
@@ -2544,7 +2917,7 @@ const World = (() => {
     g.scale.set(s, s, s);
     // en la playa, al este del muelle de pesca; base de la isla a nivel del
     // suelo y la pasarela del asset mirando de frente (sur, hacia el mar)
-    g.position.set(30, -SEA_HOUSE_MODEL.bbox.min[1] * s, 59);
+    g.position.set(SEA_HOUSE_AT.x, -SEA_HOUSE_MODEL.bbox.min[1] * s, SEA_HOUSE_AT.y);
     g.rotation.y = -Math.PI/2;
     worldGroup.add(g);
     seaHouseVis = g;
@@ -2778,7 +3151,7 @@ const World = (() => {
        la orilla apenas medio tile sobre el agua, como una isla de verdad. */
     const GRASS_Y = 1.87;   // nivel del césped en el modelo
     const SHORE_OVER_SEA = 0.55; // cuánto asoma la orilla
-    g.position.set(13.5, SHORE_OVER_SEA - GRASS_Y*s, 66);
+    g.position.set(GARDEN_AT.x, SHORE_OVER_SEA - GRASS_Y*s, GARDEN_AT.y);
     g.rotation.y = Math.PI*0.15;
     worldGroup.add(g);
     gardenCount = g.children.length;
@@ -2844,6 +3217,8 @@ const World = (() => {
     buildSeaHouse();
     buildGarden();
     snapCamera();
+    buildMinimapBase();
+    announceZone();
   }
 
   function snapCamera(){
@@ -3001,6 +3376,7 @@ const World = (() => {
     for (let i=0; i<steps; i++) update();
     if (sceneDirty) buildScene();
     updateVisuals(dt);
+    drawMinimap();
     renderer.render(scene, camera);
   }
   function loop(){
@@ -3047,11 +3423,6 @@ const World = (() => {
     buildOverworld();
     ensureRenderer();
 
-    const pos = State.get().playerPos;
-    if (pos && !solid[pos.y]?.[pos.x] && !(meta[pos.y]?.[pos.x]||{}).type){
-      player.x=player.tx=pos.x; player.y=player.ty=pos.y;
-      player.px=pos.x*TILE; player.py=pos.y*TILE;
-    }
 
     resize();
     window.addEventListener("resize", resize);
@@ -3105,6 +3476,55 @@ const World = (() => {
     };
   }
 
+  /* Inventario de puertas y puntos clave del overworld, para que
+     tools/check_region.mjs pueda comprobar por BFS que se llega a todos. */
+  /* Radiografía de la región entera (no solo de la zona cargada), para que
+     tools/check_region.mjs pueda comprobar por BFS que todo es alcanzable y
+     que ninguna frontera entre zonas se quedó sellada. */
+  function regionInfo(){
+    if (!region) return { doors: [], zones: [] };
+    const doors = [];
+    for (let y=0;y<region.H;y++) for (let x=0;x<region.W;x++){
+      const m = region.meta[y][x];
+      if (!m) continue;
+      const z = zoneAt(x, y);
+      const at = { x, y, zone: ZONE_NAMES[z.j][z.i] };
+      if (m.type === "gymdoor") doors.push({ what:"gimnasio " + m.key, ...at });
+      else if (m.type === "cavedoor" && x % 2 === 1) doors.push({ what:"cueva", ...at });
+      else if (m.type === "fishspot") doors.push({ what:"muelle de pesca", ...at });
+      else if (["shopdoor","casadoor","alcaldiadoor","cafedoor","academiadoor","norebangdoor"]
+        .includes(m.type)) doors.push({ what: m.type.replace("door",""), ...at });
+    }
+    // rejilla transitable de la región, para el BFS del validador
+    const walk = [];
+    for (let y=0;y<region.H;y++){
+      let row = "";
+      for (let x=0;x<region.W;x++) row += region.solid[y][x] ? "#" : ".";
+      walk.push(row);
+    }
+    return {
+      W: region.W, H: region.H, mode, doors, walk,
+      cols: ZONE_COLS, rows: ZONE_ROWS,
+      zone: { ...curZone, name: ZONE_NAMES[curZone.j][curZone.i] },
+      player: toGlobal(player.x, player.y),
+    };
+  }
+
+  // salidas abiertas de la zona cargada, por lado
+  function zoneExits(){
+    const out = [];
+    for (let y=0;y<MH;y++) for (let x=0;x<MW;x++){
+      const m = meta[y][x];
+      if (m && m.type === "zoneExit") out.push({ x, y, dx:m.dx, dy:m.dy });
+    }
+    return out;
+  }
+  function debugZone(i, j){
+    if (!region || mode !== "over") return false;
+    loadZone(i, j, ZONE_COLS[i] + 4, ZONE_ROWS[j] + 4);
+    return true;
+  }
+
   // teleport (debug/trucos)
   function tp(x,y){
     if (solid[y]?.[x]) return false;
@@ -3117,7 +3537,7 @@ const World = (() => {
 
   // hook de pruebas: permite entrar a interiores sin interacción
   function debugEnter(name){
-    const table = { shop:enterShop, pueblo:enterPueblo, cafe:enterCafe, academia:enterAcademia,
+    const table = { shop:enterShop, cafe:enterCafe, academia:enterAcademia,
       norebang:enterNorebang, home:enterHome, alcaldia:enterAlcaldia,
       gym:()=>enterInterior(true), cave:enterCave, exit:exitMap };
     const fn = table[name];
@@ -3126,5 +3546,5 @@ const World = (() => {
     return true;
   }
 
-  return { start, debug, debugEnter, playerFrameURL, tp };
+  return { start, debug, debugEnter, playerFrameURL, tp, regionInfo, zoneExits, debugZone };
 })();

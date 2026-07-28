@@ -40,18 +40,25 @@ const shot = async (name) => {
   console.log("  →", `${prefix}_${name}.png`);
 };
 
-// --- overworld ---
+// --- overworld: una parada por zona (coordenadas de la región) ---
 const spots = [
-  ["pradera",  30, 32],
-  ["cruce",    48, 34],
-  ["bosque",   72, 14],
-  ["playa",    34, 60],
-  ["muelle",   24, 64],
-  ["casa",      8, 10],
-  ["rio",      49, 40],
+  ["hangul",   0, 0,  20, 20],   // pueblo inicial (alcaldía + casa de Karol)
+  ["sutja",    1, 0,  64, 20],   // tienda
+  ["josa",     2, 0, 110, 20],   // academia
+  ["topik2",   0, 1,  20, 60],   // pueblo oeste
+  ["lago",     1, 1,  45, 40],   // Valle del Lago
+  ["cueva",    1, 1,  78, 44],   // bosque profundo y cueva
+  ["dongsa",   2, 1, 110, 50],   // norebang
+  ["bosquesur",0, 2,  30, 78],   // Bosque del Sur
+  ["puerto",   1, 2,  64, 82],   // Puerto Topik + muelle
+  ["jondae",   2, 2, 110, 82],   // café
+  ["borde",    0, 0,  20, 33],   // salida sur de la zona inicial
 ];
-for (const [name, x, y] of spots){
-  await page.evaluate((x, y) => World.tp(x, y), x, y);
+for (const [name, i, j, gx, gy] of spots){
+  await page.evaluate((i, j, gx, gy) => {
+    World.debugZone(i, j);
+    World.tp(gx - World.regionInfo().cols[i], gy - World.regionInfo().rows[j]);
+  }, i, j, gx, gy);
   await shot(name);
 }
 
@@ -60,7 +67,7 @@ console.log("debug:", JSON.stringify(await page.evaluate(() => {
 })));
 
 // --- interiores / pueblo / cueva ---
-for (const dest of ["pueblo", "cave", "shop"]){
+for (const dest of ["cave", "shop", "home"]){
   await page.evaluate(d => World.debugEnter(d), dest);
   await shot(dest);
 }

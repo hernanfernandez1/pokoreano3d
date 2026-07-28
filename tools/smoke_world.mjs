@@ -33,13 +33,16 @@ await page.waitForFunction('typeof World !== "undefined" && World.debug().ready'
 const checks = [];
 const check = (name, ok, extra) => checks.push((ok ? "OK   " : "FALLA") + "  " + name + (extra ? "  " + extra : ""));
 
-// el muelle sigue llegando al agua y el punto de pesca está en el mar
+// el muelle sale del Puerto Topik y llega al punto de pesca en mar abierto
 const pier = await page.evaluate(() => {
-  const d = [];
-  for (let y=59; y<=66; y++) d.push(World.tp(24, y));
-  return d;
+  const info = World.regionInfo();
+  const spot = info.doors.find(o => o.what === "muelle de pesca");
+  if (!spot) return { ok:false, why:"sin punto de pesca" };
+  const walk = [];
+  for (let y = spot.y; y > spot.y-14; y--) walk.push(World.tp(spot.x, y));
+  return { ok: walk.every(Boolean), spot:[spot.x, spot.y], walk };
 });
-check("muelle transitable de y=59 a 66", pier.every(Boolean), JSON.stringify(pier));
+check("muelle transitable hasta el mar", pier.ok, JSON.stringify(pier.spot || pier.why));
 
 // el cuarto de Karol es un mapa hecho a mano sobre el modelo 3D: hay que
 // comprobar que desde donde apareces se llega andando a la salida, al punto
@@ -76,7 +79,7 @@ await page.evaluate(() => World.debugEnter("exit"));
 await new Promise(r => setTimeout(r, 300));
 
 // interiores y vuelta al mapa
-for (const dest of ["pueblo", "cave", "shop", "cafe", "academia", "home", "alcaldia", "norebang"]){
+for (const dest of ["cave", "shop", "cafe", "academia", "home", "alcaldia", "norebang"]){
   const ok = await page.evaluate(d => World.debugEnter(d), dest);
   await new Promise(r => setTimeout(r, 350));
   const mode = await page.evaluate(() => World.debug().mode);

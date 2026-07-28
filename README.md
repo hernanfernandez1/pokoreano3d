@@ -29,14 +29,44 @@ mascotas, historia por capítulos y práctica de voz.
 - Depuración: `index.html?autostart=1` entra directo al mapa; admite `&tp=x,y`,
   `&enter=gym|cave|shop|cafe|alcaldia|academia|norebang|home|pueblo` y `&test=battle|capture`.
 
+## La región
+
+El mundo ya no es un único mapa: es una **región de 132x104 partida en 9 zonas**, y solo
+vive en memoria la que estás pisando. Para pasar a la siguiente hay que salir por la
+carretera que cruza el borde — el resto del contorno es bosque cerrado.
+
+```
+Pueblo Hangul  ── Pueblo Sutja  ── Pueblo Josa      (alcaldía+casa · tienda · academia)
+      │                 │                │
+Pueblo Topik   ── Valle del Lago ── Pueblo Dongsa   (cueva del Maestro · norebang)
+      │                 │                │
+Bosque del Sur ── Puerto Topik  ── Pueblo Jondae    (muelle de pesca · café)
+```
+
+Tres carreteras horizontales y tres verticales forman la malla; cada pueblo se planta en
+un cruce, así que siempre se llega por camino. El río parte la región de norte a sur y
+solo se cruza por los puentes. Por la playa del sur también se puede ir de una zona a
+otra, como ruta alternativa.
+
+Todo se describe con datos en `js/world.js` — `REGION` (costa, río, carreteras), `TOWNS`
+(centro de cada pueblo y qué servicios tiene) y `ZONE_COLS`/`ZONE_ROWS` (los cortes).
+Mover un pueblo es cambiar dos números; el resto se recoloca solo, incluidos los NPCs,
+que se apartan a la casilla libre más cercana si su sitio queda ocupado.
+
 ## Herramientas de desarrollo (`tools/`, necesitan `npm i` dentro de la carpeta)
 
 ```
-node tools/shot_world.mjs [prefijo]   # capturas de 10 zonas → test-shots/
+node tools/shot_world.mjs [prefijo]   # una captura por zona → test-shots/
+node tools/check_region.mjs           # accesos, fronteras, cruce a pie y guardado
 node tools/perf_world.mjs             # FPS y errores de consola
-node tools/smoke_world.mjs            # comprobaciones de juego (puertas, muelle, batalla)
+node tools/smoke_world.mjs            # puertas, interiores, batalla y captura
 node tools/shot_envassets.mjs         # hoja de contactos de ENV_ASSETS
 ```
+
+`check_region.mjs` es el que hay que correr después de tocar el mapa: comprueba por BFS
+que se llega a los 7 gimnasios y a todos los servicios, que cada zona tiene abiertas las
+fronteras que le tocan, que se cruza un borde **andando** (no con el teletransporte) y
+que la partida guardada recuerda en qué zona estabas.
 
 ### Habitaciones isométricas → cuarto de Karol
 
