@@ -25,6 +25,9 @@ mascotas, historia por capítulos y práctica de voz.
   suelo y lámina de agua comparten la misma silueta.
 - **Diorama del jardín** (`js/envGarden.js`) emergiendo del mar al suroeste y **casa en el
   mar** (`js/seaHouse.js`) en la playa, como piezas de paisaje de fondo.
+- **Vecinos de pixel-art** (`js/peopleSheet.js`): los NPCs ya no son muñecos
+  dibujados por código, salen del sprite de ArMM1998 (CC0) y se recolorean por
+  paleta exacta —camiseta, pelo y pantalón— conservando el recorte de papel.
 - **Joystick táctil** en teléfonos y tablets (esquina inferior derecha). En escritorio
   no se dibuja: sobra con el teclado. La barra superior se compacta en una sola fila.
 - Depuración: `index.html?autostart=1` entra directo al mapa; admite `&tp=x,y`,
@@ -62,6 +65,10 @@ node tools/check_region.mjs           # accesos, fronteras, cruce a pie y guarda
 node tools/perf_world.mjs             # FPS y errores de consola
 node tools/smoke_world.mjs            # puertas, interiores, batalla y captura
 node tools/check_joystick.mjs         # joystick táctil, emulando un móvil
+node tools/sheet_grid.mjs <png> <celda>   # ver una hoja de sprites con rejilla
+node tools/sheet_palette.mjs <png>       # volcar su paleta, para recolorear
+node tools/sheet2js.mjs <png> <CONST> <js>  # hornear la hoja a data URI
+node tools/shot_charsheet.mjs         # ver los personajes que se generan
 node tools/shot_envassets.mjs         # hoja de contactos de ENV_ASSETS
 ```
 

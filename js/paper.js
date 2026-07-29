@@ -140,6 +140,145 @@ const Paper = (() => {
     return { front, back: backC };
   }
 
+  /* ==========================================================
+     PERSONAJES DE PIXEL-ART (hoja js/peopleSheet.js)
+     Los muñecos dibujados por código quedaban pobres al lado del resto del
+     mundo. Ahora los NPCs salen del sprite de verdad y se recolorean por
+     paleta exacta: la hoja usa solo 11 colores, así que se cambian camiseta,
+     pelo y pantalón sin tocar la piel ni el contorno.
+     Se mantiene el recorte de papel (borde blanco) que da el estilo.
+     ========================================================== */
+  const SHEET = { FW:16, FH:32, front:0, side:32, back:64 };
+  // paleta original de la hoja → qué representa cada color
+  const SHEET_PAL = {
+    shirt:      "#c43c3c", shirtDark: "#882e2e", shirtDarkest:"#681c1c",
+    hair:       "#6a4834", hairDark:  "#432e27",
+    pants:      "#65659b", pantsLit:  "#5586b9",
+    skin:       "#e8d4b2", skinDark:  "#bfa787",
+  };
+  let sheetImg = null, sheetReady = false;
+  const sheetWatchers = [];
+  (function loadPeopleSheet(){
+    if (typeof PEOPLE_SHEET !== "string") return;
+    const im = new Image();
+    im.onload = () => { sheetImg = im; sheetReady = true; sheetWatchers.forEach(f => f()); };
+    im.src = PEOPLE_SHEET;
+  })();
+  function onSheetReady(fn){ if (sheetReady) fn(); else sheetWatchers.push(fn); }
+
+  const hex2rgb = h => {
+    const v = h.replace("#","");
+    return [parseInt(v.slice(0,2),16), parseInt(v.slice(2,4),16), parseInt(v.slice(4,6),16)];
+  };
+  // multiplica un color manteniendo su tono: sirve para sacar las sombras
+  function tone(hex, f){
+    const [r,g,b] = hex2rgb(hex.startsWith("#") ? hex : "#"+hex);
+    const c = v => Math.max(0, Math.min(255, Math.round(v*f)));
+    return [c(r), c(g), c(b)];
+  }
+
+  /* Recorta un fotograma de la hoja, cambia la paleta y lo agranda con vecino
+     más cercano (el pixel-art tiene que seguir duro al escalar). */
+  function sheetFrame(col, band, opts, up = 3){
+    const { FW, FH } = SHEET;
+    const c = canvas(FW*up, FH*up);
+    const x = c.getContext("2d", { willReadFrequently: true });
+    x.imageSmoothingEnabled = false;
+    if (!sheetImg) return c;
+    x.drawImage(sheetImg, col*FW, band, FW, FH, 0, 0, FW*up, FH*up);
+    const shirt = opts.shirt || SHEET_PAL.shirt;
+    const hair  = opts.hair  || SHEET_PAL.hair;
+    const pants = opts.pants || SHEET_PAL.pants;
+    const map = [
+      [SHEET_PAL.shirt,        tone(shirt, 1.0)],
+      [SHEET_PAL.shirtDark,    tone(shirt, 0.70)],
+      [SHEET_PAL.shirtDarkest, tone(shirt, 0.52)],
+      [SHEET_PAL.hair,         tone(hair, 1.0)],
+      [SHEET_PAL.hairDark,     tone(hair, 0.64)],
+      [SHEET_PAL.pants,        tone(pants, 1.0)],
+      [SHEET_PAL.pantsLit,     tone(pants, 1.28)],
+    ].map(([from, to]) => [hex2rgb(from), to]);
+    const d = x.getImageData(0, 0, c.width, c.height);
+    const p = d.data;
+    for (let i=0;i<p.length;i+=4){
+      if (p[i+3] < 128) continue;
+      for (const [from, to] of map){
+        if (p[i] === from[0] && p[i+1] === from[1] && p[i+2] === from[2]){
+          p[i] = to[0]; p[i+1] = to[1]; p[i+2] = to[2];
+          break;
+        }
+      }
+    }
+    x.putImageData(d, 0, 0);
+    return c;
+  }
+
+  /* Recorta un canvas a lo que de verdad tiene pintado. El muñeco no llena su
+     celda de 16x32, así que sin recortar acaba diminuto dentro del plano. */
+  function trim(src){
+    const x = src.getContext("2d", { willReadFrequently: true });
+    const d = x.getImageData(0, 0, src.width, src.height).data;
+    let x0 = src.width, y0 = src.height, x1 = -1, y1 = -1;
+    for (let y=0; y<src.height; y++) for (let px=0; px<src.width; px++){
+      if (d[(y*src.width + px)*4 + 3] < 16) continue;
+      if (px < x0) x0 = px;
+      if (px > x1) x1 = px;
+      if (y < y0) y0 = y;
+      if (y > y1) y1 = y;
+    }
+    if (x1 < 0) return src;
+    const c = canvas(x1-x0+1, y1-y0+1);
+    const cx = c.getContext("2d");
+    cx.imageSmoothingEnabled = false;
+    cx.drawImage(src, x0, y0, c.width, c.height, 0, 0, c.width, c.height);
+    return c;
+  }
+
+  /* Personaje de papel a partir de la hoja: {front, back} ya con borde.
+     El resultado tiene SIEMPRE el mismo tamaño de lienzo, con la figura
+     centrada y ajustada dentro: así el plano 3D puede fijar su proporción
+     sin esperar a que la hoja termine de cargar. */
+  /* La caja es deliberadamente ancha: el muñeco recortado mide ~45x66, así
+     que con una caja estrecha el ajuste lo limitaba el ANCHO y el personaje
+     se quedaba a dos tercios de altura, mucho más bajo que Karol. Sobrando
+     ancho, manda la altura y todos miden lo mismo; el hueco lateral es
+     transparente y no molesta. */
+  const CHAR_BOX = { w: 76, h: 104, pad: 6 };
+  const sheetCache = new Map();
+  function sheetCharacter(opts = {}){
+    const key = JSON.stringify(opts);
+    if (sheetCache.has(key)) return sheetCache.get(key);
+    const W = CHAR_BOX.w + CHAR_BOX.pad*2, H = CHAR_BOX.h + CHAR_BOX.pad*2;
+    const pair = { front: canvas(W, H), back: canvas(W, H), _sheet: true, aspect: W/H };
+    const fit = (band) => {
+      const t = trim(sheetFrame(0, band, opts));
+      const s = Math.min(CHAR_BOX.w / t.width, CHAR_BOX.h / t.height);
+      const dw = Math.round(t.width*s), dh = Math.round(t.height*s);
+      const c = canvas(CHAR_BOX.w, CHAR_BOX.h);
+      const x = c.getContext("2d");
+      x.imageSmoothingEnabled = false;
+      x.drawImage(t, (CHAR_BOX.w-dw)/2 | 0, CHAR_BOX.h-dh, dw, dh); // apoyado abajo
+      return outline(c, CHAR_BOX.pad);
+    };
+    const paint = () => {
+      [["front", SHEET.front], ["back", SHEET.back]].forEach(([k, band]) => {
+        const src = fit(band);
+        const c = pair[k];
+        const x = c.getContext("2d");
+        x.clearRect(0, 0, c.width, c.height);
+        x.imageSmoothingEnabled = false;
+        x.drawImage(src, 0, 0);
+      });
+      (pair._watchers || []).forEach(t => { t.needsUpdate = true; });
+    };
+    pair._watchers = [];
+    onSheetReady(paint);
+    sheetCache.set(key, pair);
+    return pair;
+  }
+  // permite que una textura 3D se entere cuando la hoja termina de cargar
+  function watchPair(pair, tex){ if (pair && pair._watchers) pair._watchers.push(tex); }
+
   // Paleta por defecto del jugador (espejo de sprites.js playerPalette)
   const SKIN_DEFAULTS = {
     K:"#111", S:"#f4c9a1", H:"#d62c38", R:"#e63946",
@@ -148,12 +287,7 @@ const Paper = (() => {
   function characterFromSkin(skinName){
     const defs = (typeof Sprites !== "undefined" && Sprites.skinDefs) || {};
     const pal = Object.assign({}, SKIN_DEFAULTS, defs[skinName] || {});
-    return character({
-      shirt: pal.B, sleeves: pal.W, pants: pal.J,
-      shoes: pal.T, skin: pal.S,
-      hair: { main: pal.H, shadow: shade(pal.H, 0.65), style: "short" },
-      cap: pal.R,
-    });
+    return sheetCharacter({ shirt: pal.B, hair: pal.H, pants: pal.J });
   }
 
   function shade(hex, f){
@@ -174,13 +308,15 @@ const Paper = (() => {
     blond: { main:"#eec65c", shadow:"#bc943e" },
     bald:  { main:"#e8d4b2", shadow:"#bfa787", bald:true },
   };
+  // Paletas de pantalón, para que los vecinos no vayan todos iguales
+  const NPC_PANTS = ["#5b5470", "#3f5a8a", "#6a5a3a", "#4a6b52", "#7a4a5e"];
   function npcCharacter(npc){
     const h = NPC_HAIRS[npc.hair] || NPC_HAIRS.black;
-    return character({
+    const seed = (npc.key || "").length + (npc.tint || "").length;
+    return sheetCharacter({
       shirt: npc.tint || "#3fa9f5",
-      sleeves: shade(npc.tint || "#3fa9f5", 0.8),
-      pants: "#5b5470", shoes: "#7a5a3a",
-      hair: { main: h.main, shadow: h.shadow, style: h.bald ? "bald" : (npc.long ? "long" : "short") },
+      hair: h.main,
+      pants: NPC_PANTS[seed % NPC_PANTS.length],
     });
   }
 
@@ -767,7 +903,7 @@ const Paper = (() => {
   }
 
   return {
-    outline, character, characterFromSkin, npcCharacter,
+    outline, character, characterFromSkin, npcCharacter, sheetCharacter, watchPair,
     svgCanvas, watch, textLabel, bubble,
     grassBladeTexture, cloudTexture, starTexture, exitMatTexture, rugTexture,
     animal, treeData, TREE_GREENS, house, bushGroup, chestMesh, fenceMesh,

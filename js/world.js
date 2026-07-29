@@ -2812,6 +2812,11 @@ const World = (() => {
   function makeCharPlane(pair, w, h){
     const texF = own(Paper.canvasTex(pair.front, { sharp: true }));
     const texB = own(Paper.canvasTex(pair.back, { sharp: true }));
+    // la hoja de pixel-art se carga en diferido: al llegar hay que repintar
+    if (pair._sheet){
+      Paper.watchPair(pair, texF); Paper.watchPair(pair, texB);
+      w = h * pair.aspect;   // el sprite es alto y estrecho; sin esto se achata
+    }
     const mat = own(new THREE.MeshBasicMaterial({ map: texF, transparent: true, alphaTest: 0.1, side: THREE.DoubleSide }));
     const plane = new THREE.Mesh(Paper.geo("charPlane", () => new THREE.PlaneGeometry(1, 1)), mat);
     plane.scale.set(w, h, 1);
