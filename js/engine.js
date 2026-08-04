@@ -40,8 +40,10 @@ const Engine = (() => {
   }
 
   // Random wild encounter word
+  /* El nivel elegido decide la dificultad del idioma: en principiante no
+     deben aparecer palabras avanzadas ni en la hierba ni en los exámenes. */
   function pickEncounter(pool) {
-    return pick(pool);
+    return pick(typeof Data !== undefined && Data.byLevel ? Data.byLevel(pool) : pool);
   }
 
   // Rarity roll for crates (approximate CS/LoL feel)

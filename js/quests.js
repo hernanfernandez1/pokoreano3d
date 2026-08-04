@@ -15,27 +15,28 @@ const Quests = (() => {
   };
 
   // Misiones en orden. `unlocks` abre ese gimnasio al completarla.
+  // `target` (coords de la REGIÓN) marca en el mapa dónde hay que ir; las
+  // misiones de conteo no lo llevan porque se hacen en cualquier hierba.
   const QUESTS = [
     { cap:1, title:"Preséntate ante la alcaldesa", desc:"Cruza la puerta oeste hacia el pueblo 마을 y habla con la alcaldesa en la alcaldía.",
-      goal:{ type:"talk", npc:"alcalde" } },
+      goal:{ type:"talk", npc:"alcalde" }, target:{ x:33, y:23 } },   // puerta de la alcaldía (Hangul)
     { cap:1, title:"Tus primeras palabras", desc:"Camina por la hierba alta y vence 3 palabras salvajes.",
       goal:{ type:"words", n:3 }, unlocks:"hangul" },
 
     { cap:2, title:"Visita la tienda", desc:"Habla con el tendero de la tienda 상점 (junto al cruce).",
-      goal:{ type:"talk", npc:"tendero" } },
+      goal:{ type:"talk", npc:"tendero" }, target:{ x:58, y:12 } },   // puerta de la tienda (Sutja)
     { cap:2, title:"Tu primer guardián", desc:"Pisa arbustos redondos y captura 1 guardián.",
       goal:{ type:"guardian", n:1 }, unlocks:"numeros" },
 
     { cap:3, title:"La sabiduría de la abuela", desc:"Busca a la abuela 할머니 cerca del cruce y habla con ella.",
-      goal:{ type:"talk", npc:"abuela" } },
+      goal:{ type:"talk", npc:"abuela" }, target:{ x:24, y:27 } },
     { cap:3, title:"Práctica constante", desc:"Vence 6 palabras salvajes más.",
       goal:{ type:"words", n:6 }, unlocks:"particulas" },
 
     { cap:4, title:"El muelle de pesca", desc:"Ve al muelle de la playa y pesca 3 peces respondiendo bien.",
-      goal:{ type:"fish", n:3 }, unlocks:"verbos" },
-
+      goal:{ type:"fish", n:3 }, unlocks:"verbos", target:{ x:64, y:100 } },  // punto de pesca
     { cap:5, title:"El monje del sur", desc:"Encuentra al monje 스님 cerca de la costa y habla con él.",
-      goal:{ type:"talk", npc:"monje" } },
+      goal:{ type:"talk", npc:"monje" }, target:{ x:74, y:45 } },
     { cap:5, title:"Más guardianes", desc:"Captura 2 guardianes más en los arbustos.",
       goal:{ type:"guardian", n:2 }, unlocks:"honor" },
 
@@ -43,14 +44,14 @@ const Quests = (() => {
       goal:{ type:"words", n:10 }, unlocks:"topik1" },
 
     { cap:7, title:"La fan de K-pop", desc:"Habla con la fan 팬 en la playa este.",
-      goal:{ type:"talk", npc:"fan" } },
+      goal:{ type:"talk", npc:"fan" }, target:{ x:104, y:50 } },
     { cap:7, title:"Debut en el norebang", desc:"Ve al 노래방 del pueblo y canta al menos 1 frase bien al micrófono.",
-      goal:{ type:"sing", n:1 } },
+      goal:{ type:"sing", n:1 }, target:{ x:104, y:44 } },            // puerta del norebang (Dongsa)
     { cap:7, title:"Pesca mayor", desc:"Pesca 4 peces más en el muelle.",
-      goal:{ type:"fish", n:4 }, unlocks:"topik2" },
+      goal:{ type:"fish", n:4 }, unlocks:"topik2", target:{ x:64, y:100 } },
 
     { cap:8, title:"El guardia de la cueva", desc:"Habla con el guardia frente a la cueva del bosque (noreste).",
-      goal:{ type:"talk", npc:"guardia" } },
+      goal:{ type:"talk", npc:"guardia" }, target:{ x:82, y:43 } },
     { cap:8, title:"Equipo completo", desc:"Captura 1 guardián más para completar tu equipo.",
       goal:{ type:"guardian", n:1 }, unlocks:"maestro" },
   ];
@@ -60,6 +61,8 @@ const Quests = (() => {
     return QUESTS[s.questIdx] || null;
   }
   function isDone(){ return State.get().questIdx >= QUESTS.length; }
+  // dónde hay que ir para la misión vigente (null = se hace donde estés)
+  function target(){ const q = current(); return (q && q.target) || null; }
 
   // gimnasios desbloqueados por misiones ya completadas
   function isGymUnlocked(key){
@@ -109,5 +112,5 @@ const Quests = (() => {
     UI.refreshTopbar();
   }
 
-  return { QUESTS, current, isDone, isGymUnlocked, gymLevelReq, notify, level, xpIntoLevel, XP_PER_LEVEL, GYM_LEVEL };
+  return { QUESTS, current, isDone, isGymUnlocked, gymLevelReq, notify, level, xpIntoLevel, XP_PER_LEVEL, GYM_LEVEL, target };
 })();

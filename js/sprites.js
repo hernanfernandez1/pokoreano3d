@@ -259,6 +259,7 @@ const Sprites = (() => {
     "cyber neón":    {R:"#ff3d7f", J:"#00f5d4", B:"#00202e", T:"#f15bb5", W:"#c4fbff"},
     "ninja hangul":  {R:"#111", J:"#333", B:"#000", T:"#e63946", W:"#e63946"},
     "chef bibimbap": {R:"#e63946", J:"#fff", B:"#c02a52", T:"#ffd166"},
+    "urbana":        {R:"#6b4f35", J:"#e8ddc8", B:"#241f1c", T:"#c9a86a", H:"#1c1815"},
   };
   const skins = {};
   for (const name in skinDefs) skins[name] = recolorPlayer(skinDefs[name]);

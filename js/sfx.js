@@ -69,22 +69,60 @@ const Sfx = (() => {
     try { if (fx[name]) fx[name](arg); } catch(e){}
   }
 
-  // ---------- Música de fondo (tema de pueblo tranquilo, Do mayor) ----------
-  const N = { G4:392, A4:440, C5:523, D5:587, E5:659, G5:784, A5:880 };
-  // 32 pasos de corcheas (8 compases), melodía dulce y pausada
-  const MELODY = [
-    N.C5,0,N.E5,0, N.G5,0,N.E5,0,
-    N.A5,0,N.G5,0, N.E5,0,N.D5,0,
-    N.C5,0,N.D5,N.E5, N.D5,0,N.C5,0,
-    N.A4,0,0,0, N.G4,0,0,0,
-    N.C5,0,N.E5,0, N.G5,0,N.A5,0,
-    N.G5,0,N.E5,0, N.C5,0,N.D5,0,
-    N.E5,N.D5,N.C5,0, N.A4,0,N.C5,0,
-    N.C5,0,0,0, 0,0,0,0,
-  ];
-  const BASS = [131, 98, 110, 87, 131, 98, 110, 131]; // C3 G2 A2 F2 · C3 G2 A2 C3
-  const STEP = 0.30; // ~100 bpm, más calmado
-  let musicTimer = null, nextT = 0, stepIdx = 0;
+  // ---------- Música de fondo (temas procedurales por contexto) ----------
+  const N = { E2:82, F2:87, G2:98, A2:110, C3:131, E3:165, F3:175, G3:196, A3:220, B3:247,
+              C4:262, D4:294, E4:330, F4:349, G4:392, A4:440, B4:494, C5:523, D5:587, E5:659, G5:784, A5:880 };
+  const THEMES = {
+    // pueblo y rutas: melodía dulce y pausada en Do mayor
+    world: {
+      step: 0.30, lead: "triangle", leadVol: 0.09, bassVol: 0.07, bassWave: "sine",
+      bassEvery: 4, sparkle: true,
+      melody: [
+        N.C5,0,N.E5,0, N.G5,0,N.E5,0,
+        N.A5,0,N.G5,0, N.E5,0,N.D5,0,
+        N.C5,0,N.D5,N.E5, N.D5,0,N.C5,0,
+        N.A4,0,0,0, N.G4,0,0,0,
+        N.C5,0,N.E5,0, N.G5,0,N.A5,0,
+        N.G5,0,N.E5,0, N.C5,0,N.D5,0,
+        N.E5,N.D5,N.C5,0, N.A4,0,N.C5,0,
+        N.C5,0,0,0, 0,0,0,0,
+      ],
+      bass: [131, 98, 110, 87, 131, 98, 110, 131], // C3 G2 A2 F2 · C3 G2 A2 C3
+    },
+    // cueva: La menor, grave y espaciada — se oye la humedad
+    cave: {
+      step: 0.36, lead: "sine", leadVol: 0.06, bassVol: 0.08, bassWave: "sine",
+      bassEvery: 4, sparkle: false,
+      melody: [
+        N.A3,0,0,0, N.C4,0,0,0,
+        N.E4,0,0,N.D4, N.C4,0,N.B3,0,
+        N.A3,0,0,0, N.G3,0,0,0,
+        N.F3,0,N.E3,0, N.A3,0,0,0,
+        N.A3,0,0,0, N.C4,0,N.E4,0,
+        N.D4,0,N.C4,0, N.B3,0,0,0,
+        N.A3,0,N.G3,0, N.F3,0,N.E3,0,
+        N.A3,0,0,0, 0,0,0,0,
+      ],
+      bass: [110, 87, 98, 82, 110, 87, 98, 82],   // A2 F2 G2 E2
+    },
+    // batalla: corcheas rápidas con bajo machacón — tensión de examen
+    battle: {
+      step: 0.17, lead: "square", leadVol: 0.05, bassVol: 0.045, bassWave: "square",
+      bassEvery: 2, sparkle: false,
+      melody: [
+        N.A4,0,N.A4,0, N.C5,0,N.B4,0,
+        N.E5,0,N.D5,N.C5, N.B4,0,N.G4,0,
+        N.A4,0,N.A4,0, N.C5,0,N.D5,0,
+        N.E5,0,N.E5,0, N.D5,N.C5,N.B4,0,
+        N.A4,0,N.A4,0, N.C5,0,N.B4,0,
+        N.E5,0,N.D5,N.C5, N.B4,0,N.G4,0,
+        N.F4,0,N.F4,0, N.A4,0,N.G4,0,
+        N.E4,0,N.E4,0, 0,0,0,0,
+      ],
+      bass: [110, 110, 87, 87, 98, 98, 82, 82],   // A2 A2 F2 F2 G2 G2 E2 E2
+    },
+  };
+  let musicTimer = null, nextT = 0, stepIdx = 0, theme = "world";
 
   function note(freq, t, dur, type, vol){
     const a = ac(); if (!a) return;
@@ -97,19 +135,28 @@ const Sfx = (() => {
   }
   function scheduleMusic(){
     const a = ac(); if (!a || muted) return;
+    const T = THEMES[theme];
     while (nextT < a.currentTime + 0.5){
-      const m = MELODY[stepIdx % MELODY.length];
+      const m = T.melody[stepIdx % T.melody.length];
       if (m){
-        note(m, nextT, STEP*1.6, "triangle", 0.09);        // lead suave
-        note(m*2, nextT, STEP*0.8, "sine", 0.015);         // brillo sutil
+        note(m, nextT, T.step*1.6, T.lead, T.leadVol);      // lead
+        if (T.sparkle) note(m*2, nextT, T.step*0.8, "sine", 0.015); // brillo
       }
-      if (stepIdx % 4 === 0){
-        const b = BASS[(stepIdx>>2) % BASS.length];
-        note(b, nextT, STEP*3.2, "sine", 0.07);            // bajo redondo
+      if (stepIdx % T.bassEvery === 0){
+        const b = T.bass[((stepIdx / T.bassEvery)|0) % T.bass.length];
+        note(b, nextT, T.step*3.2, T.bassWave, T.bassVol); // bajo
       }
-      nextT += STEP;
+      nextT += T.step;
       stepIdx++;
     }
+  }
+  /* Cambiar de tema en caliente: el planificador lee el tema vivo en cada
+     paso, así que el cambio se oye en el siguiente compás sin cortes. */
+  function setTheme(name){
+    if (!THEMES[name] || theme === name) return;
+    theme = name;
+    stepIdx = 0;
+    if (musicTimer){ const a = ac(); if (a) nextT = a.currentTime + 0.05; }
   }
   function startMusic(){
     if (musicTimer || muted) return;
@@ -135,5 +182,5 @@ const Sfx = (() => {
   window.addEventListener("pointerdown", kick);
   window.addEventListener("keydown", kick);
 
-  return { play, toggleMute, isMuted, startMusic, stopMusic, musicPlaying };
+  return { play, toggleMute, isMuted, startMusic, stopMusic, musicPlaying, setTheme };
 })();

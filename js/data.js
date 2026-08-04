@@ -1,5 +1,18 @@
 /* ==========================================================
-   POKOREANO — Contenido semilla
+   GUARDIANES DEL IDIOMA — Contenido
+
+   El juego es bilingüe: se estudia coreano o inglés, y el idioma se elige al
+   empezar la partida. Dos decisiones sostienen todo esto:
+
+   1. El campo `han` de cada palabra significa "la palabra en el idioma que
+      estudias", no "hangul". Se conservó el nombre para no tocar los ~70
+      sitios que ya lo usaban.
+   2. Las 8 claves de gimnasio (hangul, numeros, particulas, verbos, honor,
+      topik1, topik2, maestro) son las mismas en los dos idiomas; solo cambian
+      su nombre, su icono y sus preguntas. Así el mapa, las misiones, las
+      medallas y las afinidades de los guardianes siguen valiendo tal cual.
+
+   Cada palabra lleva `lvl`: 1 principiante · 2 medio · 3 avanzado.
    ========================================================== */
 const Data = (() => {
 
@@ -221,8 +234,339 @@ const Data = (() => {
     { key:"ruta6", name:"Ruta 6", icon:"🏙️", x:720, y:520, pool:vocab.concat(particles) },
   ];
 
-  // Todas las palabras únicas para el vocabudex inicial (no reveladas)
-  const allWords = [...hangul, ...numbers, ...vocab, ...particles];
+  // ==========================================================
+  //  Niveles
+  // ==========================================================
+  const LEVELS = [
+    { key:"basico", name:"Principiante", icon:"🌱", max:1,
+      desc:"Solo vocabulario básico, en la hierba y en los exámenes." },
+    { key:"medio",  name:"Medio",        icon:"🌿", max:2,
+      desc:"Añade el vocabulario intermedio." },
+    { key:"alto",   name:"Avanzado",     icon:"🌳", max:3,
+      desc:"Todo el vocabulario, incluido el más difícil." },
+  ];
+  // marca de nivel por familia; una palabra puede traer el suyo propio
+  const at = (arr, n) => arr.map(w => (w.lvl ? w : { ...w, lvl: n }));
 
-  return { hangul, numbers, vocab, particles, gyms, routes, allWords };
+  /* Sube de nivel las entradas cuya clave esté en la lista. Sirve para afinar
+     un conjunto grande sin escribir `lvl` palabra por palabra. */
+  const bump = (arr, n, claves) => arr.map(w =>
+    claves.includes(w.han) ? { ...w, lvl: n } : w);
+
+  // ---------- coreano: qué es difícil de verdad ----------
+  // Sin esto el principiante recibía casi todo el vocabulario y el nivel no
+  // separaba nada. Los verbos y el trato honorífico pasan a medio/avanzado.
+  const koMedio = ["먹다","마시다","가다","오다","보다","하다","자다",
+    "좋아요","싫어요","학생","선생님","오빠","언니","형","누나",
+    "하나","둘","셋","넷","다섯","여섯","일곱","여덟","백","천"];
+  const koAlto = ["공부하다","안녕하세요","감사합니다","사랑해"];
+
+  // Frases hechas: solo tienen sentido cuando ya se domina el vocabulario
+  const koFrases = [
+    { han:"이름이 뭐예요?", rom:"ireumi mwoyeyo?", es:"¿cómo te llamas?", lvl:2 },
+    { han:"어디에 가요?",   rom:"eodie gayo?",     es:"¿adónde vas?", lvl:2 },
+    { han:"얼마예요?",      rom:"eolmayeyo?",      es:"¿cuánto cuesta?", lvl:2 },
+    { han:"잘 먹겠습니다",  rom:"jal meokgesseumnida", es:"que aproveche (antes de comer)", lvl:3 },
+    { han:"잘 지냈어요?",   rom:"jal jinaesseoyo?", es:"¿qué tal has estado?", lvl:3 },
+    { han:"다시 말해 주세요", rom:"dasi malhae juseyo", es:"repítelo, por favor", lvl:3 },
+    { han:"천천히 말해 주세요", rom:"cheoncheonhi malhae juseyo", es:"habla más despacio", lvl:3 },
+    { han:"무슨 뜻이에요?", rom:"museun tteusieyo?", es:"¿qué significa?", lvl:3 },
+  ];
+
+  // ==========================================================
+  //  RUTA DE INGLÉS
+  //  Mismas 8 claves de gimnasio, contenido propio.
+  // ==========================================================
+  const enSounds = at([
+    { han:"sh", rom:"/ʃ/",  es:"como en 'ship'" },
+    { han:"ch", rom:"/tʃ/", es:"como en 'chair'" },
+    { han:"th", rom:"/θ/",  es:"como en 'think'" },
+    { han:"th", rom:"/ð/",  es:"como en 'this'" },
+    { han:"ph", rom:"/f/",  es:"como en 'phone'" },
+    { han:"wh", rom:"/w/",  es:"como en 'what'" },
+    { han:"ck", rom:"/k/",  es:"como en 'clock'" },
+    { han:"ng", rom:"/ŋ/",  es:"como en 'sing'" },
+    { han:"oo", rom:"/uː/", es:"como en 'moon'" },
+    { han:"ee", rom:"/iː/", es:"como en 'see'" },
+    { han:"ea", rom:"/iː/", es:"como en 'sea'" },
+    { han:"ai", rom:"/eɪ/", es:"como en 'rain'" },
+    { han:"ou", rom:"/aʊ/", es:"como en 'house'" },
+    { han:"oi", rom:"/ɔɪ/", es:"como en 'coin'" },
+    { han:"ar", rom:"/ɑːr/",es:"como en 'car'" },
+    { han:"ir", rom:"/ɜːr/",es:"como en 'bird'" },
+    { han:"gh", rom:"/f/",  es:"como en 'laugh'" },
+    { han:"kn", rom:"/n/",  es:"la k es muda: 'knife'" },
+    { han:"wr", rom:"/r/",  es:"la w es muda: 'write'" },
+    { han:"tion",rom:"/ʃən/",es:"como en 'nation'" },
+  ], 1);
+
+  const enNumbers = at([
+    { han:"one",    rom:"wan",     es:"1" },
+    { han:"two",    rom:"tu",      es:"2" },
+    { han:"three",  rom:"zri",     es:"3" },
+    { han:"four",   rom:"for",     es:"4" },
+    { han:"five",   rom:"faiv",    es:"5" },
+    { han:"six",    rom:"siks",    es:"6" },
+    { han:"seven",  rom:"seven",   es:"7" },
+    { han:"eight",  rom:"eit",     es:"8" },
+    { han:"nine",   rom:"nain",    es:"9" },
+    { han:"ten",    rom:"ten",     es:"10" },
+    { han:"eleven", rom:"ileven",  es:"11" },
+    { han:"twelve", rom:"tuelv",   es:"12" },
+    { han:"twenty", rom:"tuenti",  es:"20" },
+    { han:"thirty", rom:"zerti",   es:"30" },
+    { han:"fifty",  rom:"fifti",   es:"50" },
+    { han:"hundred",rom:"jandred", es:"100" },
+    { han:"thousand",rom:"zausand",es:"1000", lvl:2 },
+    { han:"first",  rom:"ferst",   es:"primero", lvl:2 },
+    { han:"second", rom:"sekond",  es:"segundo", lvl:2 },
+    { han:"third",  rom:"zerd",    es:"tercero", lvl:2 },
+  ], 1);
+
+  const enPreps = at([
+    { han:"in",      rom:"in",      es:"en (dentro)" },
+    { han:"on",      rom:"on",      es:"sobre / encima" },
+    { han:"at",      rom:"at",      es:"en (un punto)" },
+    { han:"under",   rom:"ander",   es:"debajo de" },
+    { han:"over",    rom:"over",    es:"por encima de" },
+    { han:"between", rom:"bituin",  es:"entre (dos)" },
+    { han:"next to", rom:"nekst tu",es:"al lado de" },
+    { han:"behind",  rom:"bijaind", es:"detrás de" },
+    { han:"in front of", rom:"in front ov", es:"delante de" },
+    { han:"from",    rom:"from",    es:"desde / de" },
+    { han:"to",      rom:"tu",      es:"a / hacia" },
+    { han:"with",    rom:"wiz",     es:"con" },
+    { han:"without", rom:"wizaut",  es:"sin", lvl:2 },
+    { han:"through", rom:"zru",     es:"a través de", lvl:2 },
+    { han:"across",  rom:"akros",   es:"al otro lado de", lvl:3 },
+    { han:"among",   rom:"amang",   es:"entre (varios)", lvl:3 },
+  ], 1);
+
+  const enVerbs = at([
+    { han:"to be",    rom:"tu bi",    es:"ser / estar", verb:true },
+    { han:"to have",  rom:"tu jav",   es:"tener", verb:true },
+    { han:"to do",    rom:"tu du",    es:"hacer", verb:true },
+    { han:"to go",    rom:"tu gou",   es:"ir", verb:true },
+    { han:"to eat",   rom:"tu it",    es:"comer", verb:true },
+    { han:"to drink", rom:"tu drink", es:"beber", verb:true },
+    { han:"to see",   rom:"tu si",    es:"ver", verb:true },
+    { han:"to speak", rom:"tu spik",  es:"hablar", verb:true },
+    { han:"to read",  rom:"tu rid",   es:"leer", verb:true },
+    { han:"to write", rom:"tu rait",  es:"escribir", verb:true },
+    { han:"to live",  rom:"tu liv",   es:"vivir", verb:true },
+    { han:"to work",  rom:"tu werk",  es:"trabajar", verb:true },
+    { han:"to learn", rom:"tu lern",  es:"aprender", verb:true },
+    { han:"to buy",   rom:"tu bai",   es:"comprar", verb:true },
+    { han:"to sleep", rom:"tu slip",  es:"dormir", verb:true },
+    { han:"to know",  rom:"tu nou",   es:"saber / conocer", verb:true, lvl:2 },
+    { han:"to bring", rom:"tu bring", es:"traer", verb:true, lvl:2 },
+    { han:"to choose",rom:"tu chus",  es:"elegir", verb:true, lvl:2 },
+    { han:"to become",rom:"tu bikam", es:"llegar a ser", verb:true, lvl:3 },
+    { han:"to afford",rom:"tu aford", es:"permitirse", verb:true, lvl:3 },
+  ], 1);
+
+  const enTenses = at([
+    { han:"I work",         rom:"ai werk",        es:"presente simple", lvl:1 },
+    { han:"I am working",   rom:"ai am werking",  es:"presente continuo", lvl:1 },
+    { han:"I worked",       rom:"ai werkt",       es:"pasado simple", lvl:2 },
+    { han:"I was working",  rom:"ai wos werking", es:"pasado continuo", lvl:2 },
+    { han:"I have worked",  rom:"ai jav werkt",   es:"presente perfecto", lvl:2 },
+    { han:"I will work",    rom:"ai wil werk",    es:"futuro simple", lvl:2 },
+    { han:"I would work",   rom:"ai wud werk",    es:"condicional", lvl:3 },
+    { han:"I had worked",   rom:"ai jad werkt",   es:"pasado perfecto", lvl:3 },
+    { han:"I have been working", rom:"ai jav bin werking", es:"perfecto continuo", lvl:3 },
+    { han:"I am going to work",  rom:"ai am going tu werk", es:"futuro con 'going to'", lvl:2 },
+  ], 2);
+
+  const enPhrasal = at([
+    { han:"give up",   rom:"giv ap",    es:"rendirse", lvl:2 },
+    { han:"look for",  rom:"luk for",   es:"buscar", lvl:2 },
+    { han:"find out",  rom:"faind aut", es:"averiguar", lvl:2 },
+    { han:"take off",  rom:"teik of",   es:"despegar / quitarse", lvl:2 },
+    { han:"put on",    rom:"put on",    es:"ponerse", lvl:2 },
+    { han:"turn on",   rom:"tern on",   es:"encender", lvl:1 },
+    { han:"turn off",  rom:"tern of",   es:"apagar", lvl:1 },
+    { han:"get up",    rom:"get ap",    es:"levantarse", lvl:1 },
+    { han:"come back", rom:"kam bak",   es:"volver", lvl:1 },
+    { han:"run out of",rom:"ran aut ov",es:"quedarse sin", lvl:3 },
+    { han:"put up with",rom:"put ap wiz",es:"soportar", lvl:3 },
+    { han:"look forward to", rom:"luk forward tu", es:"tener ganas de", lvl:3 },
+  ], 2);
+
+  const enPolite = at([
+    { han:"please",           rom:"plis",            es:"por favor", lvl:1 },
+    { han:"thank you",        rom:"zank yu",         es:"gracias", lvl:1 },
+    { han:"you're welcome",   rom:"yur welkom",      es:"de nada", lvl:1 },
+    { han:"excuse me",        rom:"ekskius mi",      es:"disculpe", lvl:1 },
+    { han:"I'm sorry",        rom:"aim sorri",       es:"lo siento", lvl:1 },
+    { han:"nice to meet you", rom:"nais tu mit yu",  es:"encantado", lvl:1 },
+    { han:"could you help me?",rom:"kud yu jelp mi", es:"¿podría ayudarme?", lvl:2 },
+    { han:"would you mind…?", rom:"wud yu maind",    es:"¿le importaría…?", lvl:3 },
+    { han:"I beg your pardon",rom:"ai beg yur pardon",es:"¿cómo dice?", lvl:3 },
+    { han:"sir / madam",      rom:"ser / madam",     es:"señor / señora", lvl:2 },
+  ], 1);
+
+  const enVocab = at([
+    { han:"hello",   rom:"jelou",  es:"hola" },
+    { han:"goodbye", rom:"gudbai", es:"adiós" },
+    { han:"yes",     rom:"yes",    es:"sí" },
+    { han:"no",      rom:"nou",    es:"no" },
+    { han:"water",   rom:"woter",  es:"agua" },
+    { han:"bread",   rom:"bred",   es:"pan" },
+    { han:"milk",    rom:"milk",   es:"leche" },
+    { han:"apple",   rom:"apol",   es:"manzana" },
+    { han:"house",   rom:"jaus",   es:"casa" },
+    { han:"door",    rom:"dor",    es:"puerta" },
+    { han:"book",    rom:"buk",    es:"libro" },
+    { han:"school",  rom:"skul",   es:"escuela" },
+    { han:"friend",  rom:"frend",  es:"amigo" },
+    { han:"family",  rom:"famili", es:"familia" },
+    { han:"cat",     rom:"kat",    es:"gato" },
+    { han:"dog",     rom:"dog",    es:"perro" },
+    { han:"city",    rom:"siti",   es:"ciudad" },
+    { han:"street",  rom:"strit",  es:"calle" },
+    { han:"today",   rom:"tudei",  es:"hoy" },
+    { han:"tomorrow",rom:"tumorou",es:"mañana" },
+    { han:"morning", rom:"morning",es:"mañana (parte del día)" },
+    { han:"night",   rom:"nait",   es:"noche" },
+    { han:"weather", rom:"weder",  es:"tiempo (clima)", lvl:2 },
+    { han:"money",   rom:"mani",   es:"dinero", lvl:2 },
+    { han:"job",     rom:"llob",   es:"trabajo", lvl:2 },
+    { han:"health",  rom:"jelz",   es:"salud", lvl:2 },
+    { han:"journey", rom:"llerni", es:"viaje", lvl:2 },
+    { han:"advice",  rom:"adváis", es:"consejo", lvl:2 },
+    { han:"knowledge",rom:"nolich",es:"conocimiento", lvl:3 },
+    { han:"behaviour",rom:"bijeivior",es:"comportamiento", lvl:3 },
+    { han:"achievement",rom:"achívment",es:"logro", lvl:3 },
+    { han:"environment",rom:"invaironment",es:"medio ambiente", lvl:3 },
+    { han:"opportunity",rom:"oportiuniti",es:"oportunidad", lvl:3 },
+    { han:"challenge",rom:"chalinch",es:"reto", lvl:3 },
+  ], 1);
+
+  /* Frases de inglés. En principiante son fórmulas de una línea; en medio
+     aparecen preguntas completas y en avanzado estructuras con condicional,
+     perfecto y voz pasiva. Es donde mejor se nota el salto de nivel. */
+  const enFrases = [
+    { han:"What's your name?",  rom:"wots yur neim",   es:"¿cómo te llamas?", lvl:1 },
+    { han:"How are you?",       rom:"jau ar yu",       es:"¿cómo estás?", lvl:1 },
+    { han:"How much is it?",    rom:"jau mach is it",  es:"¿cuánto cuesta?", lvl:1 },
+    { han:"I don't understand", rom:"ai dont anderstand", es:"no entiendo", lvl:1 },
+    { han:"Where are you from?",rom:"wer ar yu from",  es:"¿de dónde eres?", lvl:1 },
+    { han:"Could you say that again?", rom:"kud yu sei dat aguein", es:"¿puedes repetirlo?", lvl:2 },
+    { han:"I've been living here for two years", rom:"aiv bin living jir for tu yirs",
+      es:"llevo dos años viviendo aquí", lvl:2 },
+    { han:"What do you usually do at weekends?", rom:"wot du yu yuchuali du at wikends",
+      es:"¿qué sueles hacer los fines de semana?", lvl:2 },
+    { han:"I was about to leave when she called", rom:"ai wos abaut tu liv wen shi kold",
+      es:"estaba a punto de irme cuando llamó", lvl:3 },
+    { han:"If I had known, I would have told you", rom:"if ai jad noun ai wud jav told yu",
+      es:"si lo hubiera sabido, te lo habría dicho", lvl:3 },
+    { han:"The house was built in 1920", rom:"de jaus wos bilt in naintin tuenti",
+      es:"la casa fue construida en 1920 (pasiva)", lvl:3 },
+    { han:"I'd rather stay at home tonight", rom:"aid rader stei at joum tunait",
+      es:"prefiero quedarme en casa esta noche", lvl:3 },
+    { han:"You should have called me earlier", rom:"yu shud jav kold mi erlier",
+      es:"deberías haberme llamado antes", lvl:3 },
+    { han:"No sooner had I arrived than it started raining",
+      rom:"nou suner jad ai araivd dan it started reining",
+      es:"nada más llegar, empezó a llover (inversión)", lvl:3 },
+  ];
+
+  const enAll = [...enSounds, ...enNumbers, ...enPreps, ...enVerbs,
+                 ...enTenses, ...enPhrasal, ...enPolite, ...enVocab, ...enFrases];
+
+  const enGyms = [
+    { key:"hangul", name:"Gimnasio Fonética", leader:"Maestra Ann", leaderSprite:"hangulSpirit",
+      pool: enSounds, questionMode:"han-to-rom", total:10, passRatio:0.7, icon:"Aa",
+      x:120, y:120, description:"Ann te reta a leer sonidos del inglés." },
+    { key:"numeros", name:"Gimnasio Números", leader:"Contador Dice", leaderSprite:"numberSlime",
+      pool: enNumbers, questionMode:"mixed", total:10, passRatio:0.7, icon:"12",
+      x:260, y:150, description:"Dice mide tu rapidez con los números." },
+    { key:"particulas", name:"Gimnasio Preposiciones", leader:"Duende Pree", leaderSprite:"dokkaebi",
+      pool: enPreps, questionMode:"mixed", total:8, passRatio:0.65, icon:"in",
+      x:420, y:180, description:"Pree te lía con in, on y at." },
+    { key:"verbos", name:"Gimnasio Verbos", leader:"Capitán Verb", leaderSprite:"dokkaebi",
+      pool: enVerbs, questionMode:"mixed", total:10, passRatio:0.7, icon:"to",
+      x:560, y:220, description:"Todo verbo empieza por 'to'." },
+    { key:"honor", name:"Gimnasio Cortesía", leader:"Lady Grace", leaderSprite:"hangulSpirit",
+      pool: enPolite, questionMode:"mixed", total:6, passRatio:0.66, icon:"Mr",
+      x:700, y:260, description:"Modales de salón inglés." },
+    { key:"topik1", name:"Gimnasio Vocabulario", leader:"Examinadora Wells", leaderSprite:"numberSlime",
+      pool: enVocab, questionMode:"mixed", total:12, passRatio:0.75, icon:"A1",
+      x:840, y:300, description:"Simulacro de vocabulario básico." },
+    { key:"topik2", name:"Gimnasio Tiempos", leader:"Doctor Tense", leaderSprite:"dokkaebi",
+      pool: enTenses.concat(enPhrasal), questionMode:"mixed", total:15, passRatio:0.8, icon:"B1",
+      x:980, y:340, description:"Tiempos verbales y phrasal verbs." },
+    { key:"maestro", name:"Gimnasio Maestro", leader:"Shakespeare", leaderSprite:"hangulSpirit",
+      pool: enAll, questionMode:"mixed", total:20, passRatio:0.85, icon:"★",
+      x:1120, y:380, description:"Frente al mismísimo bardo." },
+  ];
+
+  const enRoutes = [
+    { key:"ruta1", name:"Ruta 1", icon:"🌾", x:230, y:170, pool:enSounds.concat(enVocab.slice(0,6)) },
+    { key:"ruta2", name:"Ruta 2", icon:"🏞️", x:460, y:200, pool:enNumbers.concat(enVocab.slice(6,14)) },
+    { key:"ruta3", name:"Ruta 3", icon:"🌊", x:700, y:230, pool:enVocab.slice(0,20) },
+    { key:"ruta4", name:"Ruta 4", icon:"⛰️", x:940, y:340, pool:enVocab.concat(enVerbs) },
+    { key:"ruta5", name:"Ruta 5", icon:"🌲", x:360, y:470, pool:enVocab.concat(enPreps) },
+    { key:"ruta6", name:"Ruta 6", icon:"🏙️", x:720, y:520, pool:enVocab.concat(enPhrasal) },
+  ];
+
+  // ==========================================================
+  //  Idiomas y superficie pública
+  // ==========================================================
+  // se aplica la graduación: lo básico en 1, verbos y trato en 2-3
+  const koHangul = at(hangul, 1);
+  const koNums   = bump(at(numbers, 1), 2, koMedio);
+  const koVocab  = bump(bump(at(vocab, 1), 2, koMedio), 3, koAlto).concat(koFrases);
+  const koParts  = bump(at(particles, 2), 3, ["와/과", "만"]);
+  const koAll = [...koHangul, ...koNums, ...koVocab, ...koParts];
+  const LANGS = {
+    ko: {
+      code:"ko", name:"Coreano", nativo:"한국어", flag:"🇰🇷", tts:"ko-KR",
+      hangul: koHangul, numbers: koNums, vocab: koVocab,
+      particles: koParts, gyms, routes, allWords: koAll,
+      // etiqueta de la escritura, para textos de la interfaz
+      script:"hangul",
+    },
+    en: {
+      code:"en", name:"Inglés", nativo:"English", flag:"🇬🇧", tts:"en-US",
+      hangul: enSounds, numbers: enNumbers, vocab: enVocab.concat(enFrases),
+      particles: enPreps, gyms: enGyms, routes: enRoutes, allWords: enAll,
+      script:"latin",
+    },
+  };
+
+  let curLang = "ko", curLevel = "medio";
+  const L = () => LANGS[curLang];
+  function setLang(code){ if (LANGS[code]) curLang = code; }
+  function setLevel(key){ if (LEVELS.some(l => l.key === key)) curLevel = key; }
+  const level = () => LEVELS.find(l => l.key === curLevel) || LEVELS[1];
+
+  /* Filtra un conjunto de palabras por el nivel elegido. Se usa en los
+     encuentros y en los exámenes: en principiante no deben salir palabras
+     avanzadas, pero si un conjunto se quedara vacío se devuelve entero
+     antes que dejar al jugador sin preguntas. */
+  function byLevel(pool){
+    if (!Array.isArray(pool)) return pool;
+    const max = level().max;
+    const f = pool.filter(w => (w.lvl || 1) <= max);
+    return f.length >= 4 ? f : pool;
+  }
+
+  return {
+    // idioma y nivel
+    setLang, setLevel, byLevel,
+    lang: () => L(),
+    langCode: () => curLang,
+    langs: () => Object.values(LANGS),
+    LEVELS, level, levelKey: () => curLevel,
+    // contenido del idioma activo (se conserva la misma superficie de antes)
+    get hangul(){ return L().hangul; },
+    get numbers(){ return L().numbers; },
+    get vocab(){ return L().vocab; },
+    get particles(){ return L().particles; },
+    get gyms(){ return L().gyms; },
+    get routes(){ return L().routes; },
+    get allWords(){ return L().allWords; },
+  };
 })();

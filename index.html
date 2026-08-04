@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover" />
   <title>Pokoreano — Aprende coreano al estilo Pokémon</title>
   <link rel="stylesheet" href="css/style.css" />
   <link rel="icon" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' fill='%23e63946'/><circle cx='8' cy='8' r='3' fill='%23fff'/></svg>" />
@@ -13,16 +13,36 @@
     <section id="screen-title" class="screen active">
       <div class="title-wrap">
         <div class="pokoreano-logo">
-          <span class="k1">포</span><span class="k2">코</span><span class="k3">레</span><span class="k4">아</span><span class="k5">노</span>
+          <span class="k1">수</span><span class="k2">호</span><span class="k3">신</span>
         </div>
-        <h1>POKOREANO</h1>
-        <p class="tag">Atrapa palabras. Gana medallas. Domina el 한국어.</p>
+        <h1>GUARDIANES DEL IDIOMA</h1>
+        <p class="tag">Atrapa palabras. Gana medallas. Domina el idioma.</p>
         <div class="menu">
+          <!-- el nombre se escribe aquí: en el móvil el prompt() nativo se
+               come el teclado o ni se abre, y la partida no arrancaba -->
+          <input id="trainer-name" class="input" maxlength="12"
+                 placeholder="¿Tu nombre de entrenador?" autocomplete="off" />
+
+          <div class="setup">
+            <div class="setup-label">¿Qué idioma quieres aprender?</div>
+            <div class="setup-row" id="pick-lang">
+              <button class="chip" data-lang="ko">🇰🇷 Coreano<small>한국어</small></button>
+              <button class="chip" data-lang="en">🇬🇧 Inglés<small>English</small></button>
+            </div>
+            <div class="setup-label">¿Con qué nivel empiezas?</div>
+            <div class="setup-row" id="pick-level">
+              <button class="chip" data-level="basico">🌱 Principiante</button>
+              <button class="chip" data-level="medio">🌿 Medio</button>
+              <button class="chip" data-level="alto">🌳 Avanzado</button>
+            </div>
+            <div class="setup-hint" id="setup-hint"></div>
+          </div>
+
           <button class="btn primary" data-action="new-game">Nuevo juego</button>
           <button class="btn" data-action="continue">Continuar</button>
           <button class="btn" data-action="import">Importar vocab (CSV)</button>
         </div>
-        <div class="credits">한글 · v2.0 — ahora en 3D estilo papel 📄✨</div>
+        <div class="credits">v3.0 — mundo 3D, coreano e inglés 🌏✨</div>
       </div>
     </section>
 
@@ -227,12 +247,14 @@
   <script src="js/creatures.js"></script>
   <script src="js/sprites.js"></script>
   <script src="js/karol.js"></script>
+  <script src="js/urbanaSheet.js"></script>
   <script src="js/peopleSheet.js"></script>
   <script src="js/state.js"></script>
   <script src="js/quests.js"></script>
   <script src="js/sfx.js"></script>
   <script src="js/speech.js"></script>
   <script src="js/paper.js"></script>
+  <script src="js/furniture.js"></script>
   <script src="js/seaHouse.js"></script>
   <script src="js/homeRoom.js"></script>
   <script src="js/envAssets.js"></script>

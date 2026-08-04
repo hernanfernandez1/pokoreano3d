@@ -97,6 +97,7 @@ const UI = (() => {
       playerHP: 100, enemyHP: 100,
       combo: 0, question: null,
     };
+    Sfx.setTheme("battle");
     $("#enemy-sprite").innerHTML = Sprites.wordSpirit(word.han); // el monstruo ES la palabra
     $("#battle-player-sprite").innerHTML = playerSpriteHTML(2); // Karol de espaldas
     $("#battle-player-name").textContent = State.get().playerName;
@@ -236,18 +237,32 @@ const UI = (() => {
   }
 
   function endBattle(won){
+    Sfx.setTheme(World.musicTheme ? World.musicTheme() : "world");
     if (won){
       Sfx.play("coin");
       const coins = 5 + Math.floor(Math.random()*10);
       State.addCoins(coins);
       toast(`¡Capturaste ${battle.word.han}! +${coins} monedas`);
       Quests.notify("words");
+      battle = null;
+      renderMap();
+      showScreen("screen-map");
     } else {
-      toast("Escapaste de la batalla.");
+      /* Derrota de verdad, estilo Pokémon: la palabra te deja temblando,
+         sueltas parte de las monedas y despiertas en tu casa. Sin esto
+         perder no costaba nada y las batallas no tensaban. */
+      const s = State.get();
+      const lost = Math.ceil(s.coins * 0.25);
+      if (lost > 0){ s.coins -= lost; State.save(); }
+      Sfx.play("fail");
+      battle = null;
+      renderMap();
+      showScreen("screen-map");
+      if (World.respawn) World.respawn();
+      toast(lost > 0
+        ? `😵 Te quedaste sin energía… Despiertas en casa. Se te cayeron ${lost} monedas.`
+        : "😵 Te quedaste sin energía… Despiertas en casa.", 3800);
     }
-    battle = null;
-    renderMap();
-    showScreen("screen-map");
   }
 
   // ---------- CAPTURA DE GUARDIANES ----------
@@ -803,7 +818,7 @@ const UI = (() => {
       gym.abilities.push({ creature: c, uses, affinity });
     });
     // Build a shuffled list of unique questions from pool
-    const pool = g.pool;
+    const pool = Data.byLevel(g.pool);
     const words = [];
     while (words.length < g.total) {
       const w = pool[Math.random()*pool.length|0];
@@ -814,6 +829,7 @@ const UI = (() => {
     $("#gym-total").textContent = g.total;
     $("#leader-sprite").innerHTML = Sprites.get(g.leaderSprite);
     renderGymAbilities();
+    Sfx.setTheme("battle");
     showScreen("screen-gym");
     nextGymQuestion();
   }
@@ -865,7 +881,7 @@ const UI = (() => {
         nextGymQuestion();
         return;
       case "swap": {
-        const pool = gym.gym.pool;
+        const pool = Data.byLevel(gym.gym.pool);
         const w = pool[Math.random()*pool.length|0];
         gym.questions[gym.idx] = Engine.buildQuestion(w, Data.allWords, gym.gym.questionMode);
         toast(`${a.creature.ko} cambió la pregunta.`);
@@ -981,6 +997,7 @@ const UI = (() => {
   }
 
   function finishGym(){
+    Sfx.setTheme(World.musicTheme ? World.musicTheme() : "world");
     const g = gym.gym;
     const effective = Math.max(1, g.total - gym.skipped);
     let ratio = gym.hits / effective;
@@ -1006,6 +1023,7 @@ const UI = (() => {
   }
 
   function quitGym(){
+    Sfx.setTheme(World.musicTheme ? World.musicTheme() : "world");
     gym = null;
     showScreen("screen-map");
     renderMap();
@@ -1268,6 +1286,23 @@ const UI = (() => {
       <button class="btn small primary" data-buy-crate ${s.coins<200?"disabled":""}>💰 200</button>`;
     grid.appendChild(crateCard);
 
+    // skin urbana (venta directa): rizos negros con mechas miel
+    const urbanaOwned = s.unlockedSkins.includes("urbana");
+    const urbanaImg = (typeof World !== "undefined" && World.sheetFrameURL) ? World.sheetFrameURL("urbana") : null;
+    const urbanaCard = document.createElement("div");
+    urbanaCard.className = "shop-card";
+    urbanaCard.innerHTML = `
+      <div class="g-sprite">${urbanaImg
+        ? `<img src="${urbanaImg}" alt="urbana" style="image-rendering:pixelated;width:100%;height:100%;object-fit:contain">`
+        : Sprites.skinSvg("urbana")}</div>
+      <div class="g-ko">도시 <span class="g-emoji">🧥</span></div>
+      <div class="g-sub">dosi · Skin urbana</div>
+      <div class="shop-desc">Rizos con mechas miel, chaqueta marrón y zapatillas.</div>
+      <button class="btn small ${urbanaOwned?"":"primary"}" data-buy-urbana ${urbanaOwned||s.coins<800?"disabled":""}>
+        ${urbanaOwned ? "✓ Comprada" : "💰 800"}
+      </button>`;
+    grid.appendChild(urbanaCard);
+
     grid.querySelectorAll("[data-buy-pet]").forEach(b => {
       b.onclick = () => {
         const p = Creatures.petByKey(b.dataset.buyPet);
@@ -1285,6 +1320,15 @@ const UI = (() => {
       refreshTopbar();
       openCrate(false);
     };
+    const ub = grid.querySelector("[data-buy-urbana]");
+    if (ub) ub.onclick = () => {
+      if (!State.spendCoins(800)){ toast("No te alcanzan las monedas."); return; }
+      Sfx.play("coin");
+      State.unlockSkin("urbana");
+      State.setSkin("urbana");
+      toast("¡Skin urbana equipada! 도시 스타일 ✨");
+      refreshTopbar(); renderShop();
+    };
   }
 
   // ---------- MOCHILA ----------
@@ -1298,12 +1342,18 @@ const UI = (() => {
         <div class="g-sub">${p.es}</div>
         <button class="btn small" data-pet="${p.key}">${s.activePet===p.key?"Descansar":"¡Sígueme!"}</button>
       </div>`).join("");
-    const skinCards = s.unlockedSkins.map(sk => `
+    const skinCards = s.unlockedSkins.map(sk => {
+      const sheetUrl = (typeof World !== "undefined" && World.sheetFrameURL) ? World.sheetFrameURL(sk) : null;
+      const icon = sheetUrl
+        ? `<img src="${sheetUrl}" alt="${sk}" style="image-rendering:pixelated;width:100%;height:100%;object-fit:contain">`
+        : Sprites.skinSvg(sk);
+      return `
       <div class="bag-card ${s.activeSkin===sk?"active":""}">
-        <div class="g-sprite">${Sprites.skinSvg(sk)}</div>
+        <div class="g-sprite">${icon}</div>
         <div class="g-sub">${sk}</div>
         <button class="btn small" data-skin="${sk}" ${s.activeSkin===sk?"disabled":""}>${s.activeSkin===sk?"Equipada":"Equipar"}</button>
-      </div>`).join("");
+      </div>`;
+    }).join("");
     const badgeCards = Data.gyms.map(g => {
       const has = s.badges.includes(g.key);
       return `<div class="bag-card ${has?"":"unknown"}">

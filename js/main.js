@@ -1,10 +1,40 @@
 /* ==========================================================
-   POKOREANO — bootstrap
+   GUARDIANES DEL IDIOMA — bootstrap
    ========================================================== */
 (function(){
   Engine.initTTS();
 
   const $ = UI.$;
+
+  /* ---------- Idioma y nivel de la portada ----------
+     Se eligen antes de empezar y se guardan en la partida; Data sirve el
+     contenido del idioma activo, así que basta con avisarle. */
+  const setup = { lang: "ko", level: "medio" };
+
+  function paintSetup(){
+    document.querySelectorAll("#pick-lang .chip").forEach(b =>
+      b.setAttribute("aria-pressed", String(b.dataset.lang === setup.lang)));
+    document.querySelectorAll("#pick-level .chip").forEach(b =>
+      b.setAttribute("aria-pressed", String(b.dataset.level === setup.level)));
+    const hint = $("#setup-hint");
+    if (!hint) return;
+    // se muestra cuánto vocabulario abarca la combinación elegida
+    const antesL = Data.langCode(), antesN = Data.levelKey();
+    Data.setLang(setup.lang); Data.setLevel(setup.level);
+    const n = Data.byLevel(Data.allWords).length;
+    const lv = Data.LEVELS.find(l => l.key === setup.level);
+    hint.textContent = `${Data.lang().name} · ${lv.name}: ${n} palabras`;
+    Data.setLang(antesL); Data.setLevel(antesN);
+  }
+
+  document.addEventListener("click", (e) => {
+    const b = e.target.closest("#pick-lang .chip, #pick-level .chip");
+    if (!b) return;
+    if (b.dataset.lang) setup.lang = b.dataset.lang;
+    if (b.dataset.level) setup.level = b.dataset.level;
+    paintSetup();
+  });
+  paintSetup();
 
   // Menu buttons
   document.body.addEventListener("click", (e) => {
@@ -13,9 +43,13 @@
     const a = btn.dataset.action;
     switch(a){
       case "new-game": {
-        const name = prompt("¿Tu nombre de entrenador?", "Entrenador") || "Entrenador";
+        const name = ($("#trainer-name")?.value || "").trim() || "Entrenador";
         const s = State.reset();
         s.playerName = name;
+        // el idioma y el nivel elegidos en la portada mandan sobre el defecto
+        s.lang = setup.lang;
+        s.level = setup.level;
+        State.applyLang();
         State.save();
         UI.renderMap();
         UI.showScreen("screen-map");
@@ -104,10 +138,15 @@
           if (!s.activePet) s.activePet = s.ownedPets[0];
           State.save(); UI.toast("Todas las mascotas 🐶"); break;
         case "reset":
-          if (confirm("¿Borrar toda la partida?")){
-            localStorage.removeItem("pokoreano.save.v1");
-            location.reload();
+          // sin confirm() nativo (bloquea en el móvil): doble toque para borrar
+          if (!b.dataset.armed){
+            b.dataset.armed = "1";
+            b.textContent = "⚠️ ¿Seguro? Toca otra vez";
+            setTimeout(() => { delete b.dataset.armed; b.textContent = "🗑 Borrar partida"; }, 3000);
+            return;
           }
+          localStorage.removeItem("pokoreano.save.v1");
+          location.reload();
           return;
       }
       Sfx.play("coin");

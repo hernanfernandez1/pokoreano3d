@@ -379,6 +379,13 @@ const World = (() => {
     // Van antes que los árboles para que el bosque no invada las calles.
     TOWNS.forEach(buildTown);
 
+    /* El corral se levanta más abajo, pero su hueco hay que reservarlo YA:
+       los árboles se siembran antes y el interior de la cerca es hierba
+       normal, así que se colaba uno dentro y taponaba el recinto. */
+    const corral = { x:44, y:18, w:7, h:6 };
+    treeKeepOut.length = 0;
+    treeKeepOut.push({ x: corral.x-1, y: corral.y-1, w: corral.w+2, h: corral.h+2 });
+
     /* BOSQUES: se siembran comprobando la huella del árbol, así nunca tapan
        una carretera ni un pueblo (antes había que ir esquivando a mano con
        corredores codificados). */
@@ -397,6 +404,23 @@ const World = (() => {
       const x = 4 + (Math.random()*(MW-10)|0), y = 4 + (Math.random()*(REGION.coastY-10)|0);
       if (inTown(x, y)) continue;
       if (!solid[y]?.[x] && !meta[y]?.[x] && !decor[y]?.[x] && ground[y][x]==="grass") ground[y][x]="tallgrass";
+    }
+    /* Garantía por zona: el reparto global de arriba es tan ralo que el azar
+       podía dejar una ventana entera de la rejilla (Jondae, en la costa) sin
+       una sola mata — y por tanto muda, sin batallas de palabras. Cada zona
+       recibe su propia hierba alta. */
+    for (let zj=0; zj<3; zj++) for (let zi=0; zi<3; zi++){
+      const x0 = ZONE_COLS[zi]+3, x1 = ZONE_COLS[zi+1]-3;
+      const y0 = ZONE_ROWS[zj]+3, y1 = Math.min(ZONE_ROWS[zj+1]-3, REGION.coastY-4);
+      let placed = 0, tries = 0;
+      while (placed < 10 && tries < 400){
+        tries++;
+        const x = x0 + (Math.random()*(x1-x0)|0), y = y0 + (Math.random()*(y1-y0)|0);
+        if (inTown(x, y)) continue;
+        if (solid[y]?.[x] || meta[y]?.[x] || decor[y]?.[x] || ground[y]?.[x] !== "grass") continue;
+        ground[y][x] = "tallgrass";
+        placed++;
+      }
     }
 
     // Entrada a la CUEVA (claro del bosque profundo, entre las rutas 5 y 7)
@@ -418,7 +442,6 @@ const World = (() => {
       for (let x=SEA_HOUSE_AT.x-3;x<=SEA_HOUSE_AT.x+3;x++){ solid[y][x]=true; meta[y][x]=null; }
 
     // CORRAL del granjero (cerca con animales, en la pradera central)
-    const corral = { x:44, y:18, w:7, h:6 };
     for (let x=corral.x;x<corral.x+corral.w;x++){
       ground[corral.y][x] = x===corral.x?"fenceTL":(x===corral.x+corral.w-1?"fenceTR":"fenceH");
       solid[corral.y][x]=true;
@@ -515,6 +538,27 @@ const World = (() => {
     const gy = Number.isFinite(gp?.gy) ? gp.gy : START.y;
     const z = zoneAt(gx, gy);
     loadZone(z.i, z.j, gx, gy);
+    warmCharacters();
+  }
+
+  /* Dibujar el sprite de un vecino (recorte, recoloreo por paleta y borde)
+     cuesta unos milisegundos, y hacerlo la primera vez que pisas cada zona se
+     notaba como un tirón. Son doce en toda la región: se generan de una vez
+     al arrancar, cuando el juego ya está mostrando la carga. */
+  function warmCharacters(){
+    const run = () => {
+      npcsOver.forEach(n => {
+        const pair = npcChars(n);
+        // además de dibujarlos, subirlos ya a la GPU: si no, el coste se
+        // traslada al primer frame de la zona donde vive cada vecino
+        const tf = charTex(pair.front, pair), tb = charTex(pair.back, pair);
+        if (renderer){ try { renderer.initTexture(tf); renderer.initTexture(tb); } catch(e){} }
+      });
+    };
+    // se espera un poco a que la hoja de sprites esté cargada
+    if (typeof requestIdleCallback === "function")
+      requestIdleCallback(() => setTimeout(run, 0), { timeout: 2500 });
+    else setTimeout(run, 400);
   }
 
   /* ==========================================================
@@ -623,6 +667,7 @@ const World = (() => {
     player.px=px*TILE; player.py=py*TILE;
     player.moving=false;
     petTeleport();
+    roomFurn = [];
     sceneDirty = true;
   }
 
@@ -643,12 +688,21 @@ const World = (() => {
      bosque tapaba carreteras y puertas, y antes se esquivaba a mano con
      corredores codificados en las coordenadas. */
   const TREE_FREE = ["grass","flower","flower2","flower3","tuft","mush","rock","tallgrass"];
+  /* Recintos donde no puede crecer un árbol. La comprobación de putTree mira
+     la valla, pero el INTERIOR de un corral es hierba corriente: se colaba un
+     árbol dentro y dejaba a los animales (y al jugador) sin paso, porque la
+     única salida es el portillo. */
+  const treeKeepOut = [];
+  const inKeepOut = (x, y) => treeKeepOut.some(r =>
+    x >= r.x && x < r.x+r.w && y >= r.y && y < r.y+r.h);
+
   function putTree(x,y){
     if (y+1>=MH || x+1>=MW || x<0 || y<0) return false;
     if (decor[y][x]) return false;
     for (let dy=2;dy<5;dy++) for (let dx=1;dx<3;dx++){
       const g = ground[y+dy]?.[x+dx];
       if (g === undefined) continue;                    // fuera del mapa: no estorba
+      if (inKeepOut(x+dx, y+dy)) return false;
       if (meta[y+dy][x+dx] || decor[y+dy][x+dx] || solid[y+dy][x+dx]) return false;
       if (!TREE_FREE.includes(g)) return false;         // camino, agua, arena, puente…
     }
@@ -689,6 +743,9 @@ const World = (() => {
   }
 
   function putCaveEntrance(x,y){
+    // los bosques se siembran antes que la cueva: si un árbol cayó justo en
+    // la boca, su tronco quedaba dibujado (y medio sólido) sobre la entrada
+    clearTreesRect(x-4, y-4, x+5, y+3);
     decor[y][x] = { sprite:"caveDoor" };
     for (let dy=0;dy<2;dy++) for (let dx=0;dx<4;dx++){
       if (solid[y+dy] === undefined || solid[y+dy][x+dx] === undefined) continue;
@@ -736,8 +793,9 @@ const World = (() => {
   function putHome(x,y){ putBuilding(x, y, "house", "casadoor", "casa"); }
 
   function buildShopInterior(){
-    const W=11, H=8;
+    const W=17, H=12;
     MW=W; MH=H;
+    roomFurn = [];
     ground=[]; solid=[]; meta=[]; decor=[];
     for (let y=0;y<H;y++){
       ground[y]=[]; solid[y]=[]; meta[y]=[]; decor[y]=[];
@@ -755,11 +813,11 @@ const World = (() => {
       solid[y][0]=true; solid[y][W-1]=true;
       if (y>0){ ground[y][0]="wallTop"; ground[y][W-1]="wallTop"; }
     }
-    for (let x=0;x<W;x++){ if (x!==5){ ground[H-1][x]="wallTop"; solid[H-1][x]=true; } }
-    // mostrador + tendero
-    for (let x=4;x<7;x++) ground[3][x]="rug";
+    for (let x=0;x<W;x++){ if (x!==8){ ground[H-1][x]="wallTop"; solid[H-1][x]=true; } }
+    // alfombra de la zona de mostrador
+    for (let x=6;x<11;x++) ground[3][x]="rug";
     const keeper = initNpc({
-      key:"tendero", name:"주인 아저씨 (Tendero)", x:5, y:3, dir:0, tint:"#f4a261", hair:"black",
+      key:"tendero", name:"주인 아저씨 (Tendero)", x:8, y:4, dir:0, tint:"#f4a261", hair:"black",
       wander:false, isShop:true,
       lines:[
         { ko:"어서 오세요! 뭐 드릴까요?", rom:"eoseo oseyo! mwo deurilkkayo?", es:"¡Bienvenida! ¿Qué te doy?" },
@@ -768,11 +826,28 @@ const World = (() => {
     npcsCur = [keeper];
     solid[keeper.y][keeper.x]=true;
     meta[keeper.y][keeper.x]={type:"npc", npc:keeper};
-    // salida
-    ground[H-1][5]="exitMat"; solid[H-1][5]=false;
-    meta[H-1][5]={type:"exit"};
 
-    player.x=player.tx=5; player.y=player.ty=H-2;
+    // mostrador en dos tramos: el tendero atiende desde el hueco central
+    addFurn(() => Furn.counter(3), 5, 4, 3, 1);
+    addFurn(() => Furn.counter(3), 9, 4, 3, 1);
+    // estanterías cargadas contra el muro norte y las paredes
+    addFurn(() => Furn.shelf(2), 1, 3, 2, 1);
+    addFurn(() => Furn.shelf(2), 14, 3, 2, 1);
+    addFurn(() => Furn.shelf(2), 1, 6, 2, 1);
+    addFurn(() => Furn.shelf(2), 14, 6, 2, 1);
+    addFurn(() => Furn.fridge(), 1, 8);
+    // cajas apiladas y plantas
+    addFurn(() => Furn.crate(), 3, 9);
+    addFurn(() => Furn.crate(), 14, 9);
+    addFurn(() => Furn.crate(), 15, 8);
+    addFurn(() => Furn.plant(), 1, 10);
+    addFurn(() => Furn.plant(), 15, 10);
+
+    // salida
+    ground[H-1][8]="exitMat"; solid[H-1][8]=false;
+    meta[H-1][8]={type:"exit"};
+
+    player.x=player.tx=8; player.y=player.ty=H-2;
     player.px=player.x*TILE; player.py=player.y*TILE;
     player.dir=2;
     mode="tienda";
@@ -787,9 +862,30 @@ const World = (() => {
 
   // ---------- Pueblo (마을) ----------
 
+  /* Mobiliario de interiores (js/furniture.js): las piezas se registran al
+     montar la rejilla y se materializan en buildScene, porque worldGroup
+     todavía no existe cuando se construye el mapa. Salvo `ghost`, la huella
+     de la pieza queda sólida para que el jugador no la atraviese. */
+  let roomFurn = [];
+  function addFurn(make, x, y, w=1, h=1, opts={}){
+    if (!opts.ghost) for (let dy=0; dy<h; dy++) for (let dx=0; dx<w; dx++){
+      if (solid[y+dy]?.[x+dx] !== undefined){ solid[y+dy][x+dx] = true; meta[y+dy][x+dx] = null; }
+    }
+    roomFurn.push({ make, x: x + w/2, z: y + h/2, ...opts });
+  }
+  function buildRoomFurniture(){
+    roomFurn.forEach(f => {
+      const m = f.make();
+      m.position.set(f.x, f.y0 || 0, f.z);
+      if (f.rotY) m.rotation.y = f.rotY;
+      worldGroup.add(m);
+    });
+  }
+
   // ---------- Helper: habitación interior simple ----------
-  function buildRoom(W, H, npc, modeName, floorTiles){
+  function buildRoom(W, H, npc, modeName, furnish){
     MW=W; MH=H;
+    roomFurn = [];
     ground=[]; solid=[]; meta=[]; decor=[];
     for (let y=0;y<H;y++){
       ground[y]=[]; solid[y]=[]; meta[y]=[]; decor[y]=[];
@@ -810,13 +906,14 @@ const World = (() => {
     const doorX = (W>>1);
     for (let x=0;x<W;x++){ if (x!==doorX){ ground[H-1][x]="wallTop"; solid[H-1][x]=true; } }
     for (let x=doorX-1;x<=doorX+1;x++) if (ground[3][x]!==undefined) ground[3][x]="rug";
-    if (floorTiles) floorTiles();
 
-    npc.x = doorX; npc.y = 3;
+    npc.x = npc.x ?? doorX; npc.y = npc.y ?? 3;
     initNpc(npc);
     npcsCur = [npc];
     solid[npc.y][npc.x]=true;
     meta[npc.y][npc.x]={type:"npc",npc};
+
+    if (furnish) furnish(); // mobiliario tras el NPC: no se lo puede pisar
 
     ground[H-1][doorX]="exitMat"; solid[H-1][doorX]=false;
     meta[H-1][doorX]={type:"exit"};
@@ -831,40 +928,79 @@ const World = (() => {
 
   // ---------- Café (카페) ----------
   function buildCafe(){
-    buildRoom(11, 8, {
+    buildRoom(16, 11, {
       key:"barista", name:"바리스타 (Barista)", dir:0, tint:"#c86b3c", hair:"black",
-      wander:false, action:"cafe", actionLabel:"☕ ver el menú",
+      wander:false, action:"cafe", actionLabel:"☕ ver el menú", x:2, y:4,
       lines:[
         { ko:"카페에 오신 걸 환영해요!", rom:"kapee osin geol hwanyeonghaeyo!", es:"¡Bienvenida al café!" },
         { ko:"뭐 주문하시겠어요?", rom:"mwo jumunhasigesseoyo?", es:"¿Qué desea ordenar?" },
       ]
-    }, "cafe");
+    }, "cafe", () => {
+      // barra con hueco: el barista atiende desde el medio
+      addFurn(() => Furn.counter(1.6), 1, 4);
+      addFurn(() => Furn.counter(1.6), 3, 4);
+      addFurn(() => Furn.fridge(), 1, 3);
+      addFurn(() => Furn.menuBoard(), 5, 2, 2, 1, { ghost:true });
+      // mesitas con sillas
+      [[7,5],[12,5],[7,8],[12,8]].forEach(([tx,ty]) => {
+        addFurn(() => Furn.tableRound(), tx, ty);
+        addFurn(() => Furn.chair(Math.PI/2), tx-1, ty);
+        addFurn(() => Furn.chair(-Math.PI/2), tx+1, ty);
+      });
+      addFurn(() => Furn.sofa(2, "#a0653a"), 14, 5, 1, 2, { rotY:-Math.PI/2 });
+      addFurn(() => Furn.plant(), 1, 9);
+      addFurn(() => Furn.plant(), 14, 9);
+    });
   }
   function enterCafe(){ pushMap(); Sfx.play("door"); buildCafe(); }
 
   // ---------- Academia (학원) ----------
   function buildAcademia(){
-    buildRoom(13, 9, {
+    buildRoom(17, 12, {
       key:"maestra", name:"선생님 (Maestra)", dir:0, tint:"#4361ee", hair:"black", long:true,
-      wander:false, action:"class", actionLabel:"📚 tomar clase",
+      wander:false, action:"class", actionLabel:"📚 tomar clase", x:8, y:4,
       lines:[
         { ko:"학원에 오신 걸 환영해요!", rom:"hagwone osin geol hwanyeonghaeyo!", es:"¡Bienvenida a la academia!" },
         { ko:"오늘 복습할까요?", rom:"oneul bokseuphalkkayo?", es:"¿Repasamos hoy?" },
       ]
-    }, "academia");
+    }, "academia", () => {
+      addFurn(() => Furn.blackboard(3.4), 6, 2, 5, 1, { ghost:true }); // colgada en el muro norte
+      addFurn(() => Furn.deskBig(2.2), 10, 4, 2, 1);                   // escritorio de la maestra
+      // pupitres en dos filas, con pasillo central
+      [2,4,6,10,12,14].forEach(dx => {
+        addFurn(() => Furn.studentDesk(), dx, 6);
+        addFurn(() => Furn.studentDesk(), dx, 8);
+      });
+      addFurn(() => Furn.shelf(2), 1, 3, 2, 1);
+      addFurn(() => Furn.shelf(2), 14, 3, 2, 1);
+      addFurn(() => Furn.flagKR(), 1, 5);
+      addFurn(() => Furn.plant(), 15, 10);
+      addFurn(() => Furn.plant(), 1, 10);
+    });
   }
   function enterAcademia(){ pushMap(); Sfx.play("door"); buildAcademia(); }
 
   // ---------- Norebang (노래방 · karaoke) ----------
   function buildNorebang(){
-    buildRoom(11, 8, {
+    buildRoom(15, 11, {
       key:"dj", name:"디제이 (DJ)", dir:0, tint:"#ff70a6", hair:"pink",
-      wander:false, action:"karaoke", actionLabel:"🎤 ¡a cantar!",
+      wander:false, action:"karaoke", actionLabel:"🎤 ¡a cantar!", x:10, y:5,
       lines:[
         { ko:"노래방에 오신 걸 환영해요!", rom:"noraebange osin geol hwanyeonghaeyo!", es:"¡Bienvenida al karaoke!" },
         { ko:"마이크 준비됐어요?", rom:"maikeu junbidwaesseoyo?", es:"¿Lista con el micrófono?" },
       ]
-    }, "norebang");
+    }, "norebang", () => {
+      // escenario walk-on-able con pantalla y bola de espejos
+      addFurn(() => Furn.stagePlat(5, 2.4), 5, 3, 5, 2, { ghost:true });
+      addFurn(() => Furn.karaokeScreen(), 5, 2, 5, 1, { ghost:true });
+      addFurn(() => Furn.discoBall(), 7, 5, 1, 1, { ghost:true });
+      addFurn(() => Furn.speaker(), 4, 4);
+      addFurn(() => Furn.speaker(), 11, 4);
+      addFurn(() => Furn.sofa(2, "#e87ab0"), 1, 5, 1, 2, { rotY:Math.PI/2 });
+      addFurn(() => Furn.sofa(2, "#a259ff"), 13, 6, 1, 2, { rotY:-Math.PI/2 });
+      addFurn(() => Furn.sofa(2, "#ff9770"), 3, 9, 2, 1);
+      addFurn(() => Furn.plant(), 13, 9);
+    });
   }
   function enterNorebang(){ pushMap(); Sfx.play("door"); buildNorebang(); }
 
@@ -912,6 +1048,7 @@ const World = (() => {
     player.px=player.x*TILE; player.py=player.y*TILE;
     player.dir=2;
     mode="casa";
+    roomFurn = [];
     petTeleport();
     sceneDirty = true;
     Sfx.play("ok");
@@ -920,8 +1057,9 @@ const World = (() => {
 
   // ---------- Alcaldía (interior) ----------
   function buildAlcaldia(){
-    const W=13, H=9;
+    const W=15, H=11;
     MW=W; MH=H;
+    roomFurn = [];
     ground=[]; solid=[]; meta=[]; decor=[];
     for (let y=0;y<H;y++){
       ground[y]=[]; solid[y]=[]; meta[y]=[]; decor[y]=[];
@@ -939,8 +1077,8 @@ const World = (() => {
       solid[y][0]=true; solid[y][W-1]=true;
       if (y>0){ ground[y][0]="wallTop"; ground[y][W-1]="wallTop"; }
     }
-    for (let x=0;x<W;x++){ if (x!==6){ ground[H-1][x]="wallTop"; solid[H-1][x]=true; } }
-    for (let x=5;x<8;x++) ground[3][x]="rug";
+    for (let x=0;x<W;x++){ if (x!==7){ ground[H-1][x]="wallTop"; solid[H-1][x]=true; } }
+    for (let x=5;x<10;x++){ ground[3][x]="rug"; ground[4][x]="rug"; }
 
     // La alcaldesa: sus líneas dependen de la misión actual
     const q = Quests.current();
@@ -954,17 +1092,28 @@ const World = (() => {
       lines.push({ ko:"당신은 진정한 마스터예요!", rom:"dangsineun jinjeonghan maseuteoyeyo!", es:"¡Ya eres una verdadera maestra del coreano!" });
     }
     const alcaldesa = initNpc({
-      key:"alcalde", name:"시장님 (Alcaldesa)", x:6, y:3, dir:0,
+      key:"alcalde", name:"시장님 (Alcaldesa)", x:7, y:4, dir:0,
       tint:"#a259ff", hair:"gray", long:true, wander:false, lines,
     });
     npcsCur = [alcaldesa];
     solid[alcaldesa.y][alcaldesa.x]=true;
     meta[alcaldesa.y][alcaldesa.x]={type:"npc",npc:alcaldesa};
 
-    ground[H-1][6]="exitMat"; solid[H-1][6]=false;
-    meta[H-1][6]={type:"exit"};
+    // escritorio en dos alas con la alcaldesa en medio, banderas y estanterías
+    addFurn(() => Furn.deskBig(2.2), 4, 4, 2, 1);
+    addFurn(() => Furn.deskBig(2.2), 9, 4, 2, 1);
+    addFurn(() => Furn.flagKR(), 4, 3);
+    addFurn(() => Furn.flagKR(), 10, 3);
+    addFurn(() => Furn.shelf(2), 1, 3, 2, 1);
+    addFurn(() => Furn.shelf(2), 12, 3, 2, 1);
+    addFurn(() => Furn.plant(), 1, 9);
+    addFurn(() => Furn.plant(), 13, 9);
+    addFurn(() => Furn.trophy(), 13, 5);
 
-    player.x=player.tx=6; player.y=player.ty=H-2;
+    ground[H-1][7]="exitMat"; solid[H-1][7]=false;
+    meta[H-1][7]={type:"exit"};
+
+    player.x=player.tx=7; player.y=player.ty=H-2;
     player.px=player.x*TILE; player.py=player.y*TILE;
     player.dir=2;
     mode="alcaldia";
@@ -981,6 +1130,7 @@ const World = (() => {
   function buildCave(){
     const W=22, H=14;
     MW=W; MH=H;
+    roomFurn = [];
     ground=[]; solid=[]; meta=[]; decor=[];
     for (let y=0;y<H;y++){
       ground[y]=[]; solid[y]=[]; meta[y]=[]; decor[y]=[];
@@ -1029,8 +1179,9 @@ const World = (() => {
   // ---------- Interior de gimnasio ----------
   function buildInterior(gym){
     curGymName = (gym && gym.name) ? gym.name : null;
-    const W=13, H=10;
+    const W=15, H=12;
     MW=W; MH=H;
+    roomFurn = [];
     ground=[]; solid=[]; meta=[]; decor=[];
     for (let y=0;y<H;y++){
       ground[y]=[]; solid[y]=[]; meta[y]=[]; decor[y]=[];
@@ -1049,18 +1200,18 @@ const World = (() => {
       solid[y][0]=true; solid[y][W-1]=true;
       if (y>0){ ground[y][0]="wallTop"; ground[y][W-1]="wallTop"; }
     }
-    for (let x=0;x<W;x++){ ground[H-1][x] = x===6 ? ground[H-1][x] : "wallTop"; solid[H-1][x] = x!==6; }
+    for (let x=0;x<W;x++){ ground[H-1][x] = x===7 ? ground[H-1][x] : "wallTop"; solid[H-1][x] = x!==7; }
     // rug in front of leader
-    for (let y=4;y<6;y++) for (let x=5;x<8;x++) ground[y][x]="rug";
+    for (let y=4;y<6;y++) for (let x=6;x<9;x++) ground[y][x]="rug";
     // exit mat bottom center
-    const ex=6, ey=H-1;
+    const ex=7, ey=H-1;
     ground[ey][ex]="exitMat"; solid[ey][ex]=false;
     meta[ey][ex]={type:"exit"};
 
     // leader NPC
     const leader = initNpc({
       name:`${gym.leader} — ${gym.name}`,
-      x:6, y:3, dir:0, tint:"#ffd166", hair:"black", wander:false, isLeaderOf:gym,
+      x:7, y:4, dir:0, tint:"#ffd166", hair:"black", wander:false, isLeaderOf:gym,
       lines:[
         { ko:`안녕하세요! 저는 ${gym.leader}입니다.`, rom:"annyeonghaseyo! jeoneun ... imnida.", es:`¡Hola! Yo soy ${gym.leader}.` },
         { ko:"준비됐어요? 시험을 시작할까요?", rom:"junbidwaesseoyo? siheomeul sijakhalkkayo?", es:`¿Listo? ${gym.description} ¡Empecemos el examen!` },
@@ -1069,6 +1220,17 @@ const World = (() => {
     npcsCur = [leader];
     solid[leader.y][leader.x]=true;
     meta[leader.y][leader.x]={type:"npc", npc:leader};
+
+    // tarima del líder + farolillos de piedra y banderas ceremoniales
+    addFurn(() => Furn.stagePlat(3, 2), 6, 3, 3, 2, { ghost:true });
+    addFurn(() => Paper.stoneLanternMesh(), 2, 4);
+    addFurn(() => Paper.stoneLanternMesh(), 12, 4);
+    addFurn(() => Furn.flagKR(), 3, 3);
+    addFurn(() => Furn.flagKR(), 11, 3);
+    addFurn(() => Furn.trophy(), 1, 3);
+    addFurn(() => Furn.trophy(), 13, 3);
+    addFurn(() => Furn.plant(), 1, 10);
+    addFurn(() => Furn.plant(), 13, 10);
 
     // place player at exit
     player.x=player.tx=ex; player.y=player.ty=ey-1;
@@ -1103,6 +1265,7 @@ const World = (() => {
     ({ ground, solid, meta, decor, MW, MH, mode } = st);
     npcsCur = st.npcs;
     grassPatches = st.grassPatches;
+    roomFurn = [];
     Sfx.play("door");
     const px = st.pos.x;
     const py = (st.pos.y+1 < MH && !solid[st.pos.y+1]?.[px]) ? st.pos.y+1 : st.pos.y;
@@ -1112,6 +1275,17 @@ const World = (() => {
     petTeleport();
     sceneDirty = true;
   }
+
+  /* Derrota en batalla: despertar en casa. Se limpia la pila de mapas por si
+     la palabra pilló dentro de un sitio y se vuelve a la plaza del pueblo
+     inicial, que es zona segura y la conoce todo el mundo. */
+  function respawn(){
+    mapStack.length = 0;
+    mode = "over";
+    loadZone(0, 0, START.x, START.y);
+  }
+  // qué tema de música toca donde estás (para volver de una batalla)
+  const musicTheme = () => mode === "cueva" ? "cave" : "world";
 
   // ---------- Animales de granja (ambiente, lógica) ----------
   let farmAnimals = [];
@@ -1326,12 +1500,44 @@ const World = (() => {
     s.playerPos = { gx:g.x, gy:g.y };
   });
 
+  /* Reserva por terreno: la hierba alta y los arbustos spawnean AUNQUE nadie
+     haya sembrado encuentros a mano en ese trozo de mapa. Antes los spawns
+     vivían solo en unos rectángulos de coordenadas fijas (grassPatches y
+     tryBush), así que las matas decorativas y cualquier lugar nuevo quedaban
+     mudos. La reserva y el bioma se deducen de la zona actual. */
+  const ZONE_ROUTE = [   // qué pool de Data.routes toca en cada zona
+    [0, 1, 1],
+    [2, 3, 3],
+    [4, 4, 5],
+  ];
+  const ZONE_BIOME = [   // qué guardianes viven en cada zona
+    ["pradera","pradera","bosque"],
+    ["pradera","bosque","bosque"],
+    ["bosque","costa", "costa"],
+  ];
+  function terrainEncounter(){
+    const g = ground[player.y]?.[player.x];
+    if (g === "tallgrass"){
+      if (mode !== "over" || Math.random() >= 0.08) return;
+      // en pleno pueblo no hay bichos: las plazas son zona segura
+      const gg = toGlobal(player.x, player.y);
+      if (inTown(gg.x, gg.y)) return;
+      const pool = Data.routes[ZONE_ROUTE[curZone.j]?.[curZone.i] ?? 0].pool;
+      Sfx.play("encounter");
+      UI.startWildBattleWord(Engine.pickEncounter(pool));
+    } else if (g === "bush" || g === "bushSand" || g === "caveRock"){
+      if (Math.random() >= 0.35) return;
+      const biome = mode === "cueva" ? "cueva" : (ZONE_BIOME[curZone.j]?.[curZone.i] || "pradera");
+      UI.startCaptureFromWorld(biome);
+    }
+  }
+
   function onArrive(){
     const s = State.get();
     if (mode==="over"){ const g = toGlobal(player.x, player.y); s.playerPos = { gx:g.x, gy:g.y }; }
     announceZone();
     const m = meta[player.y][player.x];
-    if (!m) return;
+    if (!m){ terrainEncounter(); return; }
     if (m.type==="grass"){
       // la hierba alta da batallas de palabras solo a veces
       if (Math.random() < 0.08){
@@ -1484,14 +1690,22 @@ const World = (() => {
       else if (d.sprite === "fountain"){ c.fillStyle="#7fd8ff"; c.fillRect(x*S, y*S, S*3, S*3); }
       else if (d.sprite === "townSign"){ c.fillStyle="#fffdf4"; c.fillRect(x*S, y*S, S, S); }
     }
-    // marcas fijas del overworld: gimnasios
+    // marcas fijas del overworld: gimnasios (edificio en miniatura)
     if (mode === "over"){
       const s = State.get();
       gymHouses.forEach(g => {
         const has = s.badges.includes(g.key);
+        const cx = (g.x+3)*S, cy = (g.y+5)*S;
         c.fillStyle = has ? "#ffb400" : "#e63946";
         c.strokeStyle = "#33314e"; c.lineWidth = 1;
-        c.beginPath(); c.arc((g.x+3)*S, (g.y+5)*S, 3, 0, 7); c.fill(); c.stroke();
+        // tejado triangular + cuerpo con puerta: un gimnasio, no un punto
+        c.beginPath();
+        c.moveTo(cx-3.6, cy-0.4); c.lineTo(cx, cy-4.4); c.lineTo(cx+3.6, cy-0.4);
+        c.closePath(); c.fill(); c.stroke();
+        c.fillRect(cx-2.5, cy-0.4, 5, 4.2);
+        c.strokeRect(cx-2.5, cy-0.4, 5, 4.2);
+        c.fillStyle = "#33314e";
+        c.fillRect(cx-0.8, cy+1.6, 1.6, 2.2);
       });
     }
   }
@@ -1504,13 +1718,30 @@ const World = (() => {
     mmLast = now;
     const S = MM_SCALE, c = cv.getContext("2d");
     c.drawImage(mmBase, 0, 0);
-    // jugador: anillo blanco + punto rojo (parpadeo suave)
+    // jugador: flecha GPS azul que apunta hacia donde miras (0↓ 1← 2↑ 3→)
     const px = (player.px/TILE + 0.5) * S, py = (player.py/TILE + 0.5) * S;
-    const pulse = 3 + Math.sin(now*0.006)*0.6;
-    c.fillStyle = "#fff";
-    c.beginPath(); c.arc(px, py, pulse+1.4, 0, 7); c.fill();
-    c.fillStyle = "#e63946";
-    c.beginPath(); c.arc(px, py, pulse, 0, 7); c.fill();
+    const ang = [Math.PI, -Math.PI/2, 0, Math.PI/2][player.dir] || 0;
+    c.save();
+    c.translate(px, py);
+    c.rotate(ang);
+    c.fillStyle = "#3fa9f5"; c.strokeStyle = "#fff"; c.lineWidth = 1.6;
+    c.beginPath(); c.moveTo(0, -5.2); c.lineTo(3.8, 3.8); c.lineTo(0, 1.9); c.lineTo(-3.8, 3.8);
+    c.closePath(); c.fill(); c.stroke();
+    c.restore();
+    // objetivo de la misión vigente: ❗ dorado pulsante (si cae en esta zona)
+    const qt = (typeof Quests !== "undefined" && Quests.target) ? Quests.target() : null;
+    if (qt && mode === "over"){
+      const lx = qt.x - zoneX0, ly = qt.y - zoneY0;
+      if (lx >= 0 && lx < MW && ly >= 0 && ly < MH){
+        const mp = 1 + Math.sin(now*0.008)*0.14;
+        c.font = `900 ${Math.round(12*mp)}px sans-serif`;
+        c.textAlign = "center"; c.textBaseline = "middle";
+        c.lineWidth = 2.6; c.strokeStyle = "#fff";
+        c.strokeText("!", (lx+0.5)*S, (ly+0.5)*S);
+        c.fillStyle = "#ffb400";
+        c.fillText("!", (lx+0.5)*S, (ly+0.5)*S);
+      }
+    }
   }
 
   // ---------- NPC wandering ----------
@@ -1596,7 +1827,9 @@ const World = (() => {
     animalVis = []; butterflyVis = []; clouds = [];
     animFountains = []; animSparkles = []; animPinwheels = [];
     seaHouseVis = null;
-    playerVis = null; petVis = null; waterMat = null; waterTexA = null; waterTexB = null;
+    playerVis = null; petVis = null; waterMat = null; waterMatB = null;
+    objectiveMark = null;
+    // waterTexA/B están cacheadas por zona: se conservan a propósito
   }
 
   // ---------- caches de personajes (fuera de la escena) ----------
@@ -1612,40 +1845,56 @@ const World = (() => {
     return charCache[k];
   }
 
-  // ---------- sprite real de Karol (hoja embebida en js/karol.js) ----------
-  // La skin "clásico" usa el sprite auténtico de Karol; el resto de skins
-  // siguen recoloreando al personaje de papel como antes.
-  const karol = { ready: false, frames: [] }; // 4 frames de frente con borde blanco
-  (function loadKarol(){
-    if (typeof KAROL_SHEET !== "string") return;
+  // ---------- sprites reales por hoja (embebidas en js/karol.js, js/urbanaSheet.js) ----------
+  // Las skins con hoja usan su sprite auténtico; el resto de skins siguen
+  // recoloreando al personaje de papel como antes.
+  const SHEET_SKINS = {
+    "clásico": { uri: () => (typeof KAROL_SHEET !== "undefined" ? KAROL_SHEET : null),
+                 cols: 4, rows: 4, frontRow: 0, backRow: 0, up: 3, outline: 7 },
+    "urbana":  { uri: () => (typeof URBANA_SHEET !== "undefined" ? URBANA_SHEET : null),
+                 cols: 4, rows: 2, frontRow: 0, backRow: 1, up: 1, outline: 10 },
+  };
+  const sheetSkins = {}; // nombre -> {ready, front:[4 frames], back:[4 frames]}
+  for (const name in SHEET_SKINS){
+    const def = SHEET_SKINS[name];
+    const entry = sheetSkins[name] = { ready: false, front: [], back: [] };
+    const uri = def.uri();
+    if (!uri) continue;
     const img = new Image();
     img.onload = () => {
-      const FW = img.width/4, FH = img.height/4;
-      // Se reescala x3 con vecino más cercano antes de recortar el borde: el
+      const FW = img.width/def.cols, FH = img.height/def.rows;
+      // Se reescala con vecino más cercano antes de recortar el borde: el
       // pixel-art se mantiene duro y la textura tiene texeles de sobra, así
       // que en pantalla el personaje sale nítido en vez de emborronado.
-      const UP = 3;
-      for (let f = 0; f < 4; f++){
-        const c = document.createElement("canvas"); c.width = FW*UP; c.height = FH*UP;
-        const x = c.getContext("2d");
-        x.imageSmoothingEnabled = false;
-        x.drawImage(img, f*FW, 0, FW, FH, 0, 0, FW*UP, FH*UP); // fila 0 = de frente
-        karol.frames.push(Paper.outline(c, 7*UP));
-      }
-      karol.ready = true;
-      swapPlayerToKarol(); // por si la escena ya estaba construida
+      const cut = (row) => {
+        const out = [];
+        for (let f = 0; f < 4; f++){
+          const c = document.createElement("canvas");
+          c.width = FW*def.up; c.height = FH*def.up;
+          const x = c.getContext("2d");
+          x.imageSmoothingEnabled = false;
+          x.drawImage(img, f*FW, row*FH, FW, FH, 0, 0, FW*def.up, FH*def.up);
+          out.push(Paper.outline(c, def.outline*def.up));
+        }
+        return out;
+      };
+      entry.front = cut(def.frontRow);
+      entry.back = cut(def.backRow);
+      entry.ready = true;
+      applySheetSkin(); // por si la escena ya estaba construida
     };
-    img.src = KAROL_SHEET;
-  })();
-  function swapPlayerToKarol(){
-    if (!playerVis || !karol.ready || playerVis.skin !== "clásico") return;
-    playerVis.karolTex = karol.frames.map(f => own(Paper.canvasTex(f, { sharp: true })));
-    playerVis.texF = playerVis.texB = playerVis.karolTex[0];
-    playerVis.mat.map = playerVis.karolTex[0];
+    img.src = uri;
+  }
+  function applySheetSkin(){
+    if (!playerVis) return;
+    const ss = sheetSkins[playerVis.skin];
+    if (!ss || !ss.ready) return;
+    playerVis.sheetTex = { front: ss.front.map(f => charTex(f)), back: ss.back.map(f => charTex(f)) };
+    playerVis.mat.map = playerVis.sheetTex.front[0];
     playerVis.mat.needsUpdate = true;
     // si la UI (batalla/topbar) ya dibujó al personaje con el fallback, refrescarla
     try {
-      const url = karol.frames[0].toDataURL();
+      const url = ss.front[0].toDataURL();
       document.querySelectorAll('img[alt="Karol"]').forEach(im => { im.src = url; });
     } catch(e){}
   }
@@ -1665,7 +1914,7 @@ const World = (() => {
   let clouds = [];
   let animFountains = [], animSparkles = [], animPinwheels = [];
   let seaHouseVis = null; // casa en el mar (js/seaHouse.js)
-  let waterMat = null, waterTexA = null, waterTexB = null, waterT = 0, waterPhase = false;
+  let waterMat = null, waterMatB = null, waterTexA = null, waterTexB = null, waterT = 0;
 
   /* ==========================================================
      BIBLIOTECA 3D — pack StylisedEnv
@@ -1845,7 +2094,7 @@ const World = (() => {
     grass: "#6fc255",
     grassPatch: ["#84d365", "#62b44b", "#93dd74", "#57a944", "#a6e383", "#7ac95c"],
     grassDot: "#57a03e",
-    tall: "#4e9e52", tallDark:"#3b8242",
+    tall: "#5aa84c", tallDark:"#3b8242", tallLight:"#8ad46a",
     sand: "#f3ddaa", sandPatch: ["#f8e7bd", "#e9cd95", "#f2d9a2"], sandDot:"#e2c68d",
     path: "#d9a870", pathPatch: ["#e2b57e", "#cb9a62", "#dcae78"], pathDot:"#c69158",
     waterDeep: "#2a72bd", waterShallow: "#4dbcdd",
@@ -1952,9 +2201,19 @@ const World = (() => {
         x.fillRect(tx*PPS + (h%13)+2, ty*PPS + ((h>>4)%13)+2, 2, 2);
         x.fillRect(tx*PPS + ((h>>8)%15)+1, ty*PPS + ((h>>12)%15)+1, 2, 2);
         x.globalAlpha = 1;
+        // florecillas silvestres diminutas, muy esparcidas por el césped
+        if (h % 9 === 0){
+          x.fillStyle = ["#fffdf4", "#ffd9e8", "#fff3a3"][(h>>5) % 3];
+          x.globalAlpha = 0.85;
+          x.fillRect(tx*PPS + ((h>>7)%15)+2, ty*PPS + ((h>>11)%15)+2, 2, 2);
+          x.globalAlpha = 1;
+        }
       } else if (name === "tallgrass"){
-        x.strokeStyle = GCOL.tallDark; x.lineWidth = 1.6; x.lineCap = "round";
-        for (let i=0;i<4;i++){
+        // briznas en dos tonos: con un solo color oscuro el tile se leía
+        // como un bloque sólido en vez de hierba alta
+        x.lineWidth = 1.6; x.lineCap = "round";
+        for (let i=0;i<7;i++){
+          x.strokeStyle = (i % 2) ? GCOL.tallDark : GCOL.tallLight;
           const bx = tx*PPS + 3 + ((h>>(i*3))%14);
           x.beginPath();
           x.moveTo(bx, ty*PPS + PPS-2);
@@ -2244,10 +2503,32 @@ const World = (() => {
     heightMap = blur(heightMap, 2);
   }
 
+  /* Texturas de suelo y agua cacheadas por zona. Hornearlas cuesta poco, pero
+     cada una es un lienzo de ~880x720 y volver a subirla a la GPU en cada
+     cambio de zona era la mayor parte del parón. Al volver a una zona ya
+     visitada se reutiliza tal cual. */
+  const zoneTexCache = new Map();
+  const zoneKey = () => mode + "|" + curZone.i + "," + curZone.j;
+  function cachedTex(kind, make){
+    const k = zoneKey() + "|" + kind;
+    let t = zoneTexCache.get(k);
+    if (t) return t;
+    t = new THREE.CanvasTexture(make());
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.anisotropy = 4;
+    // cada lienzo ocupa varios MB en la GPU: se guardan solo los últimos
+    if (zoneTexCache.size >= 24){
+      const viejo = zoneTexCache.keys().next().value;
+      const tv = zoneTexCache.get(viejo);
+      zoneTexCache.delete(viejo);
+      try { tv.dispose(); } catch(e){}
+    }
+    zoneTexCache.set(k, t);
+    return t;
+  }
+
   function buildGroundMesh(){
-    const tex = own(new THREE.CanvasTexture(bakeGroundCanvas()));
-    tex.colorSpace = THREE.SRGBColorSpace;
-    tex.anisotropy = 4;
+    const tex = cachedTex("suelo", bakeGroundCanvas);
     const mat = own(new THREE.MeshLambertMaterial({ map: tex }));
     // una celda por tile para poder levantar el relieve vértice a vértice
     const geoM = own(new THREE.PlaneGeometry(MW, MH, MW, MH));
@@ -2264,11 +2545,33 @@ const World = (() => {
     worldGroup.add(mesh);
     // Faldón: una llanura enorme justo por debajo del mapa para que el borde
     // no se recorte contra el vacío; la niebla la funde con el fondo.
-    const SKIRT = { over:"#67b352", pueblo:"#67b352", cueva:"#3a3348" };
-    if (SKIRT[mode]){
+    if (mode === "over" || mode === "pueblo"){
+      /* Antes era un plano de un verde plano distinto al del mapa y se veía
+         como una alfombra cortada a cuchillo. Ahora se hornea con la MISMA
+         hierba del suelo (base + manchas) y se repite 6x6, así el borde del
+         mapa se confunde con la llanura hasta que la niebla se la lleva. */
+      const tex = cachedTex("faldon", () => {
+        const c = document.createElement("canvas");
+        c.width = c.height = 512;
+        const x = c.getContext("2d");
+        x.fillStyle = GCOL.grass;
+        x.fillRect(0, 0, 512, 512);
+        paintPatches(x, 512, 512, GCOL.grassPatch, 46, 20, 90, 0.5, 11);
+        paintPatches(x, 512, 512, GCOL.grassPatch, 22, 60, 160, 0.28, 77);
+        return c;
+      });
+      tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+      tex.repeat.set(6, 6);
       const skirt = new THREE.Mesh(
         own(new THREE.PlaneGeometry(MW*6, MH*6)),
-        own(new THREE.MeshLambertMaterial({ color: SKIRT[mode] })));
+        own(new THREE.MeshLambertMaterial({ map: tex })));
+      skirt.rotation.x = -Math.PI/2;
+      skirt.position.set(MW/2, -0.08, MH/2);
+      worldGroup.add(skirt);
+    } else if (mode === "cueva"){
+      const skirt = new THREE.Mesh(
+        own(new THREE.PlaneGeometry(MW*6, MH*6)),
+        own(new THREE.MeshLambertMaterial({ color: "#3a3348" })));
       skirt.rotation.x = -Math.PI/2;
       skirt.position.set(MW/2, -0.08, MH/2);
       worldGroup.add(skirt);
@@ -2304,11 +2607,17 @@ const World = (() => {
     let has = false;
     for (let y=0; y<MH && !has; y++) for (let x=0; x<MW; x++) if (ground[y][x]==="water"){ has = true; break; }
     if (!has) return;
-    waterTexA = own(new THREE.CanvasTexture(bakeWaterCanvas(false)));
-    waterTexB = own(new THREE.CanvasTexture(bakeWaterCanvas(true)));
-    waterTexA.colorSpace = waterTexB.colorSpace = THREE.SRGBColorSpace;
+    waterTexA = cachedTex("aguaA", () => bakeWaterCanvas(false));
+    waterTexB = cachedTex("aguaB", () => bakeWaterCanvas(true));
+    /* Dos láminas apiladas: la de arriba (fase B) sube y baja su opacidad en
+       un vaivén continuo, así el agua ondula suave en vez de cambiar de
+       golpe cada medio segundo. */
     waterMat = own(new THREE.MeshPhongMaterial({
       map: waterTexA, transparent: true, opacity: 0.92,
+      shininess: 110, specular: 0x99ddff,
+    }));
+    waterMatB = own(new THREE.MeshPhongMaterial({
+      map: waterTexB, transparent: true, opacity: 0,
       shininess: 110, specular: 0x99ddff,
     }));
     const geoW = own(new THREE.PlaneGeometry(MW, MH));
@@ -2316,6 +2625,10 @@ const World = (() => {
     mesh.rotation.x = -Math.PI/2;
     mesh.position.set(MW/2, 0.03, MH/2);
     worldGroup.add(mesh);
+    const meshB = new THREE.Mesh(geoW, waterMatB);
+    meshB.rotation.x = -Math.PI/2;
+    meshB.position.set(MW/2, 0.036, MH/2);
+    worldGroup.add(meshB);
   }
 
   // ---------- construcción de decorados ----------
@@ -2402,7 +2715,35 @@ const World = (() => {
       }
     }
 
-    // --- suelo (objetos por tile) ---
+    /* Arboleda EXTERIOR: más allá del borde solo había el faldón de hierba
+       plano, y el límite del mapa se veía como una llanura verde pelada.
+       Se siembra una franja de árboles solo visuales al otro lado del
+       contorno, donde la REGIÓN tiene suelo plantable (así las carreteras,
+       el río y la playa quedan limpios solos). */
+    if (mode === "over" && region){
+      const PLANTABLE = ["grass","flower","flower2","flower3","tuft","tallgrass","mush","rock"];
+      const tryOuter = (gx, gy) => {
+        if (!PLANTABLE.includes(region.ground[gy]?.[gx])) return;
+        if (region.decor[gy]?.[gx] || region.meta[gy]?.[gx]) return;
+        if (inTown(gx, gy)) return;
+        trees.push({ x: gx - zoneX0 + 0.5, z: gy - zoneY0 + 0.5, h: hsh(gx, gy) });
+      };
+      const B = 9; // profundidad de la franja
+      for (let x = -B; x < MW+B; x += 2){
+        for (let d = 2; d <= B; d += 2){
+          const jx = ((x + d) % 3) * 0.4; // desorden para que no se note la rejilla
+          tryOuter(zoneX0 + x + jx, zoneY0 - d);
+          tryOuter(zoneX0 + x + jx, zoneY0 + MH - 1 + d);
+        }
+      }
+      for (let y = -B; y < MH+B; y += 2){
+        for (let d = 2; d <= B; d += 2){
+          tryOuter(zoneX0 - d, zoneY0 + y);
+          tryOuter(zoneX0 + MW - 1 + d, zoneY0 + y);
+        }
+      }
+    }
+
     for (let y=0; y<MH; y++) for (let x=0; x<MW; x++){
       const g = ground[y][x];
       const cx = x+0.5, cz = y+0.5;
@@ -2780,23 +3121,8 @@ const World = (() => {
     const skirt = new THREE.Mesh(own(new THREE.BoxGeometry(MW+1.5, 0.3, 3.8)), Paper.lambert(Paper.shade(col, 0.75)));
     skirt.position.set(MW/2, 0.15, 1.0);
     worldGroup.add(skirt);
-    // mostrador de la tienda
-    if (mode === "tienda"){
-      const counter = new THREE.Mesh(Paper.geo("counter", () => new THREE.BoxGeometry(2.7, 0.85, 0.7)), Paper.lambert("#8a5a2b"));
-      counter.position.set(5.5, 0.425, 4.05);
-      counter.castShadow = true;
-      worldGroup.add(counter);
-      const top = new THREE.Mesh(Paper.geo("counterTop", () => new THREE.BoxGeometry(2.9, 0.1, 0.85)), Paper.lambert("#c48b5e"));
-      top.position.set(5.5, 0.9, 4.05);
-      worldGroup.add(top);
-    }
-    // gimnasio: tarima del líder
-    if (mode === "interior"){
-      const stage = new THREE.Mesh(Paper.geo("gymStage", () => new THREE.CylinderGeometry(1.6, 1.8, 0.25, 18)), Paper.lambert("#d4b46a"));
-      stage.position.set(6.5, 0.125, 3.5);
-      stage.receiveShadow = true;
-      worldGroup.add(stage);
-    }
+    // (el mostrador de la tienda y la tarima del gimnasio ahora son
+    //  mobiliario registrado con addFurn en cada build*)
   }
 
   // ---------- personajes ----------
@@ -2809,14 +3135,26 @@ const World = (() => {
     m.position.y = 0.015;
     return m;
   }
+  /* Las texturas de personaje viven FUERA de la escena. Antes se creaban y
+     se destruían en cada reconstrucción, así que cambiar de zona resubía a la
+     GPU la lámina de todos los vecinos: ~95 ms de parón. Ahora se cachean
+     contra su propio lienzo y sobreviven a los rebuilds. */
+  const charTexCache = new WeakMap();
+  let bubbleCv = null;
+  const bubbleCanvas = () => bubbleCv || (bubbleCv = Paper.bubble());
+  function charTex(cv, pair){
+    let t = charTexCache.get(cv);
+    if (t) return t;
+    t = Paper.canvasTex(cv, { sharp: true });
+    if (pair && pair._sheet) Paper.watchPair(pair, t);
+    charTexCache.set(cv, t);
+    return t;
+  }
   function makeCharPlane(pair, w, h){
-    const texF = own(Paper.canvasTex(pair.front, { sharp: true }));
-    const texB = own(Paper.canvasTex(pair.back, { sharp: true }));
-    // la hoja de pixel-art se carga en diferido: al llegar hay que repintar
-    if (pair._sheet){
-      Paper.watchPair(pair, texF); Paper.watchPair(pair, texB);
-      w = h * pair.aspect;   // el sprite es alto y estrecho; sin esto se achata
-    }
+    const texF = charTex(pair.front, pair);
+    const texB = charTex(pair.back, pair);
+    // el sprite de la hoja es alto y estrecho; sin esto se achata
+    if (pair._sheet) w = h * pair.aspect;
     const mat = own(new THREE.MeshBasicMaterial({ map: texF, transparent: true, alphaTest: 0.1, side: THREE.DoubleSide }));
     const plane = new THREE.Mesh(Paper.geo("charPlane", () => new THREE.PlaneGeometry(1, 1)), mat);
     plane.scale.set(w, h, 1);
@@ -2825,17 +3163,20 @@ const World = (() => {
   }
 
   function buildCharacters(){
-    // jugador (Karol auténtica con la skin clásica; personaje de papel con el resto)
+    // jugador (sprite de hoja si la skin lo tiene; personaje de papel si no)
     const skin = State.get().activeSkin;
-    const useKarol = skin === "clásico" && karol.ready;
-    const pair = useKarol ? { front: karol.frames[0], back: karol.frames[0] } : playerChars(skin);
+    const ss = sheetSkins[skin];
+    const useSheet = ss && ss.ready;
+    const pair = useSheet ? { front: ss.front[0], back: ss.back[0] } : playerChars(skin);
     const g = new THREE.Group();
     g.add(makeBlobShadow());
-    const cp = useKarol ? makeCharPlane(pair, 1.0, 1.3) : makeCharPlane(pair, 0.95, 1.25);
+    const cp = useSheet
+      ? (skin === "clásico" ? makeCharPlane(pair, 1.0, 1.3) : makeCharPlane(pair, 0.98, 1.34))
+      : makeCharPlane(pair, 0.95, 1.25);
     g.add(cp.plane);
     worldGroup.add(g);
     playerVis = { group: g, ...cp, skin, flip: 0, flipT: 0 };
-    if (useKarol) swapPlayerToKarol();
+    if (useSheet) applySheetSkin();
 
     // NPCs
     npcsCur.forEach((n, i) => {
@@ -2846,7 +3187,7 @@ const World = (() => {
         // NPCs que no son personas (el gato de casa): se dibujan con su
         // sprite de criatura en vez del muñeco de papel
         const cv = Paper.svgCanvas(Creatures.petSprite(n.creature), 192, 14);
-        const tex = own(Paper.canvasTex(cv, { sharp: true }));
+        const tex = charTex(cv);
         Paper.watch(cv, tex);
         const mat = own(new THREE.MeshBasicMaterial({ map: tex, transparent: true, alphaTest: 0.1, side: THREE.DoubleSide }));
         const plane = new THREE.Mesh(Paper.geo("charPlane", () => new THREE.PlaneGeometry(1, 1)), mat);
@@ -2858,8 +3199,7 @@ const World = (() => {
       }
       ng.add(ncp.plane);
       // bocadillo "…"
-      const bcv = Paper.bubble();
-      const btex = own(Paper.canvasTex(bcv));
+      const btex = charTex(bubbleCanvas());
       const bmat = own(new THREE.SpriteMaterial({ map: btex, transparent: true, depthWrite: false }));
       const bub = new THREE.Sprite(bmat);
       bub.scale.set(0.62, 0.48, 1);
@@ -2877,7 +3217,7 @@ const World = (() => {
     if (petVis){ worldGroup.remove(petVis.group); petVis = null; }
     if (!pet) return;
     const c = Paper.svgCanvas(Creatures.petSprite(pet.key), 192, 14);
-    const tex = own(Paper.canvasTex(c, { sharp: true }));
+    const tex = charTex(c);
     Paper.watch(c, tex);
     const mat = own(new THREE.MeshBasicMaterial({ map: tex, transparent: true, alphaTest: 0.1, side: THREE.DoubleSide }));
     const g = new THREE.Group();
@@ -2895,7 +3235,7 @@ const World = (() => {
     if (mode === "over"){
       farmAnimals.forEach(a => {
         const c = animalCanvas(a.kind);
-        const tex = own(Paper.canvasTex(c, { sharp: true }));
+        const tex = charTex(c);
         const mat = own(new THREE.MeshBasicMaterial({ map: tex, transparent: true, alphaTest: 0.1, side: THREE.DoubleSide }));
         const g = new THREE.Group();
         g.add(makeBlobShadow());
@@ -2932,6 +3272,12 @@ const World = (() => {
   function b64ToU32(s){ const b = atob(s); const u = new Uint8Array(b.length); for (let i=0;i<b.length;i++) u[i]=b.charCodeAt(i); return new Uint32Array(u.buffer); }
   function buildSeaHouse(){
     if (mode !== "over" || typeof SEA_HOUSE_MODEL === "undefined") return;
+    /* La casa vive en coordenadas de la REGIÓN (playa oeste, 32,88). Al
+       partir el mapa en zonas se seguía dibujando en esas coordenadas en
+       TODAS las zonas, o sea fuera del mapa en todas: parecía quitada. Solo
+       se planta si la zona cargada la contiene, traducida a local. */
+    const lx = SEA_HOUSE_AT.x - zoneX0, lz = SEA_HOUSE_AT.y - zoneY0;
+    if (lx < -8 || lz < -8 || lx > MW+8 || lz > MH+8) return;
     if (!seaHouseRaw){
       seaHouseRaw = SEA_HOUSE_MODEL.meshes.map(m => ({
         pos: b64ToF32(m.pos), nor: m.nor ? b64ToF32(m.nor) : null,
@@ -2955,7 +3301,7 @@ const World = (() => {
     g.scale.set(s, s, s);
     // en la playa, al este del muelle de pesca; base de la isla a nivel del
     // suelo y la pasarela del asset mirando de frente (sur, hacia el mar)
-    g.position.set(SEA_HOUSE_AT.x, -SEA_HOUSE_MODEL.bbox.min[1] * s, SEA_HOUSE_AT.y);
+    g.position.set(lx, -SEA_HOUSE_MODEL.bbox.min[1] * s, lz);
     g.rotation.y = -Math.PI/2;
     worldGroup.add(g);
     seaHouseVis = g;
@@ -3137,6 +3483,10 @@ const World = (() => {
   let gardenRaw = null;
   function buildGarden(){
     if (mode !== "over" || typeof ENV_GARDEN_MODEL === "undefined") return;
+    // igual que la casa del mar: GARDEN_AT es de la REGIÓN (mar abierto al
+    // sur, 104,99) y hay que plantarla solo en su zona, traducida a local
+    const lx = GARDEN_AT.x - zoneX0, lz = GARDEN_AT.y - zoneY0;
+    if (lx < -10 || lz < -10 || lx > MW+10 || lz > MH+10) return;
     if (!gardenRaw){
       gardenRaw = ENV_GARDEN_MODEL.meshes.map(m => ({
         pos: b64ToF32(m.pos), nor: m.nor ? b64ToF32(m.nor) : null,
@@ -3189,10 +3539,51 @@ const World = (() => {
        la orilla apenas medio tile sobre el agua, como una isla de verdad. */
     const GRASS_Y = 1.87;   // nivel del césped en el modelo
     const SHORE_OVER_SEA = 0.55; // cuánto asoma la orilla
-    g.position.set(GARDEN_AT.x, SHORE_OVER_SEA - GRASS_Y*s, GARDEN_AT.y);
+    g.position.set(lx, SHORE_OVER_SEA - GRASS_Y*s, lz);
     g.rotation.y = Math.PI*0.15;
     worldGroup.add(g);
     gardenCount = g.children.length;
+  }
+
+  /* ---------- marcador de misión ----------
+     Rombo dorado flotante sobre el objetivo de la misión vigente, como el
+     "▼" de los RPG: si el objetivo cae en esta zona lo corona; si está en
+     otra, señala el borde por el que hay que salir para acercarse. */
+  let objectiveMark = null;
+  /* Marca del objetivo. Antes, si el objetivo estaba en OTRA zona, se recortaba
+     su posición al borde de la zona actual: el "!" acababa plantado en sitios
+     sin sentido (dentro del corral, encima de un árbol) y parecía un fallo.
+     Ahora solo se muestra si el objetivo está de verdad en este mapa; para
+     saber hacia dónde ir ya están el minimapa y el banner de misión. */
+  function objectiveLocal(){
+    const t = (typeof Quests !== "undefined" && Quests.target) ? Quests.target() : null;
+    if (!t) return null;
+    const lx = t.x - zoneX0, lz = t.y - zoneY0;
+    if (lx < 1 || lx >= MW-1 || lz < 1 || lz >= MH-1) return null;
+    return { x: lx, z: lz };
+  }
+  function buildObjectiveMark(){
+    objectiveMark = null;
+    if (mode !== "over") return;
+    const p = objectiveLocal();
+    if (!p) return;
+    const cv = document.createElement("canvas"); cv.width = cv.height = 64;
+    const x = cv.getContext("2d");
+    x.font = "900 46px sans-serif";
+    x.textAlign = "center"; x.textBaseline = "middle";
+    x.lineWidth = 10; x.strokeStyle = "#fff";
+    x.strokeText("!", 32, 34);
+    x.fillStyle = "#ffb400";
+    x.fillText("!", 32, 34);
+    const tex = own(Paper.canvasTex(cv));
+    const sp = new THREE.Sprite(own(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false })));
+    sp.scale.set(1.2, 1.2, 1);
+    // sobre el relieve, no a una altura fija: en una loma quedaba enterrado y
+    // en una hondonada, flotando en el aire
+    sp.userData.baseY = terrainY(p.x, p.z) + 2.6;
+    sp.position.set(p.x, sp.userData.baseY, p.z);
+    worldGroup.add(sp);
+    objectiveMark = sp;
   }
 
   // ---------- ambiente por modo (cielo, luces, niebla) ----------
@@ -3201,6 +3592,8 @@ const World = (() => {
     casa:"#f7ecd8", alcaldia:"#eadcf7", interior:"#f7e8c0",
   };
   function applyModeAmbience(){
+    // banda sonora del contexto: la cueva suena a cueva, el resto al aire libre
+    if (typeof Sfx !== "undefined" && Sfx.setTheme) Sfx.setTheme(mode === "cueva" ? "cave" : "world");
     camOffset = mode === "casa"
       // el cuarto de Karol es pequeño pero de muros altos: la cámara se aleja
       // y se descentra para que quepa entero sin recortar la cama
@@ -3250,10 +3643,12 @@ const World = (() => {
     scanAndBuildDecor();
     // el cuarto de Karol es un modelo entero: trae su propio suelo y muros
     if (!buildHomeRoom()) buildInteriorWalls();
+    buildRoomFurniture();
     buildCharacters();
     buildAmbient();
     buildSeaHouse();
     buildGarden();
+    buildObjectiveMark();
     snapCamera();
     buildMinimapBase();
     announceZone();
@@ -3281,17 +3676,23 @@ const World = (() => {
       const pv = playerVis;
       const skin = State.get().activeSkin;
       if (pv.skin !== skin){
-        const pair = playerChars(skin);
-        pv.texF.image = pair.front; pv.texF.needsUpdate = true;
-        pv.texB.image = pair.back;  pv.texB.needsUpdate = true;
         pv.skin = skin;
+        const ss = sheetSkins[skin];
+        if (ss && ss.ready){
+          pv.sheetTex = { front: ss.front.map(f => charTex(f)), back: ss.back.map(f => charTex(f)) };
+        } else {
+          pv.sheetTex = null;
+          const pair = playerChars(skin);
+          pv.texF.image = pair.front; pv.texF.needsUpdate = true;
+          pv.texB.image = pair.back;  pv.texB.needsUpdate = true;
+        }
       }
       const gx = player.px/TILE + 0.5, gz = player.py/TILE + 0.5;
       pv.group.position.set(gx, terrainY(gx, gz), gz);
       const hop = player.moving ? Math.abs(Math.sin(player.animT*0.5))*0.09 : 0;
       pv.plane.position.y = pv.plane.scale.y/2 + hop;
-      pv.mat.map = pv.karolTex
-        ? pv.karolTex[player.moving ? (player.frame % pv.karolTex.length) : 0] // Karol: caminata animada
+      pv.mat.map = pv.sheetTex
+        ? (player.dir === 2 ? pv.sheetTex.back : pv.sheetTex.front)[player.moving ? (player.frame % 4) : 0]
         : (player.dir === 2) ? pv.texB : pv.texF;
       if (player.dir === 1) pv.flipT = Math.PI;
       else if (player.dir === 3 || player.dir === 0) pv.flipT = 0;
@@ -3325,13 +3726,10 @@ const World = (() => {
       petVis.plane.rotation.y = Math.atan2(camX - gx, camZ - gz);
     }
 
-    // agua (2 fases)
+    // agua: la fase B respira sobre la A en un vaivén de ~4 segundos
     if (waterMat){
       waterT += dt;
-      if (waterT > 550){
-        waterT = 0; waterPhase = !waterPhase;
-        waterMat.map = waterPhase ? waterTexB : waterTexA;
-      }
+      if (waterMatB) waterMatB.opacity = 0.92 * (0.5 + 0.5*Math.sin(waterT*0.0016));
     }
 
     // fuentes
@@ -3381,6 +3779,12 @@ const World = (() => {
 
     // la cúpula del cielo viaja con la cámara: nunca se alcanza el horizonte
     if (skyDome && skyDome.visible) skyDome.position.copy(camera.position);
+    // marcador de misión: vaivén flotante con pulso
+    if (objectiveMark){
+      objectiveMark.position.y = objectiveMark.userData.baseY + Math.sin(now*0.004)*0.22;
+      const pulse = 1.2 + Math.sin(now*0.005)*0.08;
+      objectiveMark.scale.set(pulse, pulse, 1);
+    }
     // luz de cueva sigue al jugador
     const tx = player.px/TILE + 0.5, tz = player.py/TILE + 0.5;
     caveLight.position.set(tx, terrainY(tx, tz) + 1.9, tz);
@@ -3550,14 +3954,21 @@ const World = (() => {
     document.addEventListener("visibilitychange", () => { if (document.hidden) release(); });
   }
 
-  // Frame del personaje de papel (con la skin activa) para UI de batalla/topbar
+  // Frame del personaje (con la skin activa) para UI de batalla/topbar
   function playerFrameURL(row=0){
     try {
       const skin = State.get().activeSkin;
-      if (skin === "clásico" && karol.ready) return karol.frames[0].toDataURL();
+      const ss = sheetSkins[skin];
+      if (ss && ss.ready) return (row === 2 ? ss.back[0] : ss.front[0]).toDataURL();
       const pair = playerChars(skin);
       return (row === 2 ? pair.back : pair.front).toDataURL();
     } catch(e){ return null; }
+  }
+
+  // Frame frontal de una skin con hoja (para previsualizarla en la tienda)
+  function sheetFrameURL(skin){
+    const ss = sheetSkins[skin];
+    return (ss && ss.ready) ? ss.front[0].toDataURL() : null;
   }
 
   function debug(){
@@ -3659,5 +4070,5 @@ const World = (() => {
     return true;
   }
 
-  return { start, debug, debugEnter, playerFrameURL, tp, regionInfo, zoneExits, debugZone };
+  return { start, debug, debugEnter, playerFrameURL, sheetFrameURL, tp, regionInfo, zoneExits, debugZone, respawn, musicTheme };
 })();

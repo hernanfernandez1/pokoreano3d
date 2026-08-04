@@ -1,11 +1,13 @@
 /* ==========================================================
-   POKOREANO — State + persistence
+   GUARDIANES DEL IDIOMA — State + persistence
    ========================================================== */
 const State = (() => {
   const KEY = "pokoreano.save.v1";
 
   const defaults = () => ({
     playerName: "Karol",
+    lang: "ko",           // idioma que se estudia: "ko" | "en"
+    level: "medio",       // basico | medio | alto
     activeSkin: "clásico",
     unlockedSkins: ["clásico"],
     badges: [],           // ["hangul","numeros",...]
@@ -25,11 +27,24 @@ const State = (() => {
 
   let cur = null;
 
+  /* El contenido del juego (vocabulario, gimnasios) sale de Data, que tiene
+     un idioma activo. Cada vez que la partida cambia hay que sincronizarlo,
+     o se seguiría jugando con el idioma anterior. */
+  function applyLang(){
+    if (typeof Data === "undefined" || !cur) return;
+    Data.setLang(cur.lang || "ko");
+    Data.setLevel(cur.level || "medio");
+  }
+  // cambiar de idioma/nivel desde la interfaz
+  function setLang(code){ const s = get(); s.lang = code; applyLang(); save(); }
+  function setLevel(key){ const s = get(); s.level = key; applyLang(); save(); }
+
   function load(){
     try {
       const raw = localStorage.getItem(KEY);
       if (!raw) return null;
       cur = JSON.parse(raw);
+      applyLang();
       return cur;
     } catch(e){ return null; }
   }
@@ -47,6 +62,7 @@ const State = (() => {
   }
   function reset(){
     cur = defaults();
+    applyLang();
     save();
     return cur;
   }
@@ -151,6 +167,7 @@ const State = (() => {
 
   return {
     load, save, reset, get, defaults, onBeforeSave,
+    applyLang, setLang, setLevel,
     catchWord, reviewWord, grantBadge, addCoins, spendCoins,
     unlockSkin, setSkin, setGymBest,
     catchGuardian, setTeam, addTeamXp,
