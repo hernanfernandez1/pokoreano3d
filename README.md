@@ -1,6 +1,6 @@
-# 포코레아노 POKOREANO — v3.0 ✨
+# 수호신 GUARDIANES DEL IDIOMA — v3.0 ✨
 
-Juego estilo Pokémon para aprender coreano, con un **mundo 3D low-poly** renderizado con
+Juego estilo Pokémon para aprender **coreano o inglés**, con un **mundo 3D low-poly** renderizado con
 Three.js: praderas pintadas a mano, bosques de árboles poligonales, playa con marea,
 casas de verdad y cuevas. Toda la lógica original se conserva: overworld caminable,
 batallas de vocabulario, gimnasios-examen, medallas, cajas estilo CS/LoL con skins,
@@ -33,9 +33,34 @@ mascotas, historia por capítulos y práctica de voz.
 - Depuración: `index.html?autostart=1` entra directo al mapa; admite `&tp=x,y`,
   `&enter=gym|cave|shop|cafe|alcaldia|academia|norebang|home` y `&test=battle|capture`.
 
+## Idioma y nivel
+
+Al empezar se elige **qué idioma estudiar** (coreano o inglés) y **con qué nivel**
+(principiante, medio o avanzado). El nivel es la dificultad del contenido: filtra qué
+palabras salen en la hierba alta y en los exámenes de gimnasio. No toca la racha para
+capturar guardianes, que depende de la rareza de cada uno.
+
+|          | Principiante | Medio | Avanzado |
+|----------|-------------:|------:|---------:|
+| Coreano  | 51 | 85 | 96 |
+| Inglés   | 102 | 132 | 156 |
+
+Dos decisiones sostienen el bilingüismo sin duplicar el juego:
+
+1. **Las 8 claves de gimnasio son las mismas en los dos idiomas** (hangul, numeros,
+   particulas, verbos, honor, topik1, topik2, maestro); solo cambian su nombre, su icono
+   y sus preguntas. Así el mapa, las misiones, las medallas y las afinidades de los
+   guardianes siguen valiendo tal cual.
+2. El campo `han` de cada palabra significa "la palabra en el idioma que estudias". Se
+   conservó el nombre para no tocar los ~70 sitios que ya lo usaban.
+
+Los rótulos del mundo (pueblos, carteles, banner de zona) y los diálogos de los 17 NPCs
+salen de `Data.world()`, que los sirve en el idioma activo: jugando en inglés no queda
+hangul suelto por el mapa.
+
 ## La región
 
-El mundo ya no es un único mapa: es una **región de 132x104 partida en 9 zonas**, y solo
+El mundo es una **isla**: una región de 132x104 partida en 9 zonas, rodeada de mar, y solo
 vive en memoria la que estás pisando. Para pasar a la siguiente hay que salir por la
 carretera que cruza el borde — el resto del contorno es bosque cerrado.
 
@@ -65,6 +90,7 @@ node tools/check_region.mjs           # accesos, fronteras, cruce a pie y guarda
 node tools/perf_world.mjs             # FPS y errores de consola
 node tools/smoke_world.mjs            # puertas, interiores, batalla y captura
 node tools/check_joystick.mjs         # joystick táctil, emulando un móvil
+node tools/check_lang.mjs             # idioma, nivel y rótulos del mundo
 node tools/sheet_grid.mjs <png> <celda>   # ver una hoja de sprites con rejilla
 node tools/sheet_palette.mjs <png>       # volcar su paleta, para recolorear
 node tools/sheet2js.mjs <png> <CONST> <js>  # hornear la hoja a data URI

@@ -184,7 +184,7 @@ const World = (() => {
     // letrero de entrada, junto al camino que llega del sur
     const sx = t.cx - 3, sy = plaza.y1 + 2;
     if (!solid[sy]?.[sx] && !decor[sy]?.[sx] && !meta[sy]?.[sx]){
-      decor[sy][sx] = { sprite:"townSign", text:t.name };
+      decor[sy][sx] = { sprite:"townSign", text: townLabel(t).name };
       solid[sy][sx] = true;
     }
   }
@@ -575,16 +575,22 @@ const World = (() => {
      la zona vecina su parte sólida se queda aquí sin nada que dibujar — un
      muro invisible. */
   const ZONE_ROWS = [0, 34, 68, 104];
-  const ZONE_NAMES = [
-    ["Pueblo Hangul",  "Pueblo Sutja",  "Pueblo Josa"],
-    ["Pueblo Topik",   "Valle del Lago", "Pueblo Dongsa"],
-    ["Bosque del Sur", "Puerto Topik",  "Pueblo Jondae"],
+  /* Los rótulos del mundo salen de Data, que los sirve en el idioma que se
+     esté estudiando: jugando en inglés no pintan nada los nombres coreanos.
+     La rejilla dice qué hay en cada zona; el texto lo pone el idioma. */
+  const ZONE_AT = [
+    ["hangul", "numeros", "particulas"],
+    ["topik2", "lago",    "verbos"],
+    ["bosque", "topik1",  "honor"],
   ];
-  const ZONE_KO = [
-    ["한글 마을", "숫자 마을", "조사 마을"],
-    ["토픽 마을", "호수 골짜기", "동사 마을"],
-    ["남쪽 숲",   "토픽 항구", "존경 마을"],
-  ];
+  function zoneLabel(i, j){
+    const k = ZONE_AT[j][i], w = Data.world();
+    if (k === "lago")   return { name: w.zones.lago,   sub: w.zones.lagoSub };
+    if (k === "bosque") return { name: w.zones.bosque, sub: w.zones.bosqueSub };
+    return w.towns[k] || { name:"—", sub:"" };
+  }
+  // nombre de un pueblo por la clave de su gimnasio
+  const townLabel = t => Data.world().towns[t.gym] || { name:t.name, sub:t.ko };
   const START = { x:20, y:20 };   // plaza de Pueblo Hangul
 
   let region = null;              // mapa maestro completo
@@ -620,13 +626,23 @@ const World = (() => {
       for (let x=0;x<W;x++) if (meta[y][x] === null && ground[y][x] === "chest") ground[y][x] = "grass";
     }
 
+    /* Un árbol se dibuja 2 casillas a la derecha y 3,5 por debajo de su ancla.
+       Los que el recorte deja pegados al borde caían fuera del mapa y, ahora
+       que más allá hay mar, se veían plantados sobre el agua. Se quitan los
+       que no caben enteros. */
+    for (let y=0;y<H;y++) for (let x=0;x<W;x++){
+      if (decor[y][x]?.sprite !== "tree") continue;
+      // la copa mide ~1,5 casillas de radio alrededor de (x+2, y+3,5)
+      if (x+4 >= W || y+6 >= H || x < 1) decor[y][x] = null;
+    }
+
     /* Arboleda de cierre pegada al contorno, para que el límite de la zona sea
        un bosque y no una pared invisible. Va ANTES de sellar el borde: la
        huella del árbol incluye la última fila, y putTree() se niega a plantar
        sobre casilla sólida, así que sellando primero no crecía ni uno.
        Como también se niega sobre camino, los pasos quedan despejados solos. */
-    for (let x=0;x<W-3;x+=2){ putTree(x, 0); putTree(x, H-5); }
-    for (let y=0;y<H-5;y+=3){ putTree(0, y); putTree(W-3, y); }
+    for (let x=1;x<W-5;x+=2){ putTree(x, 0); putTree(x, H-7); }
+    for (let y=0;y<H-7;y+=3){ putTree(1, y); putTree(W-5, y); }
 
     // contorno: sólido salvo donde la carretera sale hacia una zona vecina
     const hasNeighbour = (di, dj) => {
@@ -1399,7 +1415,7 @@ const World = (() => {
   function advanceDialog(){
     if (!Dialog.open) return;
     Dialog.idx++;
-    if (Dialog.idx >= Dialog.npc.lines.length){
+    if (Dialog.idx >= npcVoice(Dialog.npc).lines.length){
       const npc = Dialog.npc;
       closeDialog();
       if (npc.isLeaderOf){ exitMap(); UI.startGymFromWorld(npc.isLeaderOf); }
@@ -1418,16 +1434,27 @@ const World = (() => {
     const el = document.getElementById("dialog");
     if (el) el.hidden = true;
   }
+  /* Los diálogos originales están escritos en coreano dentro de este
+     archivo. Si se juega en otro idioma, Data trae la versión traducida del
+     NPC (nombre y frases); si a alguno le falta, se queda el original antes
+     que dejar al personaje mudo. */
+  function npcVoice(npc){
+    const t = Data.world().npc;
+    const v = t && npc.key ? t[npc.key] : null;
+    if (!v) return { name: npc.name, lines: npc.lines };
+    return { name: v.name || npc.name, lines: v.lines || npc.lines };
+  }
   function renderDialog(){
     const el = document.getElementById("dialog");
-    const line = Dialog.npc.lines[Dialog.idx];
+    const voz = npcVoice(Dialog.npc);
+    const line = voz.lines[Math.min(Dialog.idx, voz.lines.length-1)];
     el.hidden = false;
-    el.querySelector(".dlg-name").textContent = Dialog.npc.name;
+    el.querySelector(".dlg-name").textContent = voz.name;
     el.querySelector(".dlg-ko").textContent = line.ko;
     el.querySelector(".dlg-rom").textContent = line.rom;
     el.querySelector(".dlg-es").textContent = line.es;
     el.querySelector(".dlg-more").textContent =
-      Dialog.idx < Dialog.npc.lines.length-1 ? "▼ espacio / clic"
+      Dialog.idx < voz.lines.length-1 ? "▼ espacio / clic"
       : (Dialog.npc.isLeaderOf ? "⚔ ¡empezar examen!"
         : (Dialog.npc.actionLabel || (Dialog.npc.isShop ? "🛒 abrir tienda" : "✕ cerrar")));
     Engine.speak(line.ko);
@@ -1631,9 +1658,10 @@ const World = (() => {
     const g = toGlobal(player.x, player.y);
     for (const t of TOWNS){
       const r = townRect(t);
-      if (g.x>=r.x && g.x<r.x+r.w && g.y>=r.y && g.y<r.y+r.h) return { name:t.name, ko:t.ko };
+      if (g.x>=r.x && g.x<r.x+r.w && g.y>=r.y && g.y<r.y+r.h){ const n = townLabel(t); return { name:n.name, ko:n.sub }; }
     }
-    return { name: ZONE_NAMES[curZone.j][curZone.i], ko: ZONE_KO[curZone.j][curZone.i] };
+    const z = zoneLabel(curZone.i, curZone.j);
+    return { name: z.name, ko: z.sub };
   }
 
   let lastZoneKey = "";
@@ -2008,6 +2036,12 @@ const World = (() => {
       // pieza sembrada se apoya sola en la loma que le toque.
       add(key, geo, mat, p){
         if (!geo) return;
+        /* Nada se dibuja fuera de la zona. Un árbol se pinta 3,5 casillas por
+           debajo de su ancla, así que los del borde se salían del mapa; con
+           el faldón de hierba no se notaba, pero ahora fuera hay mar y
+           aparecían árboles flotando. En vez de ajustar cada sitio que
+           siembra, la regla vive aquí, que es por donde pasa todo. */
+        if (p.x < -0.5 || p.z < -0.5 || p.x > MW+0.5 || p.z > MH+0.5) return;
         p.y = (p.y || 0) + terrainY(p.x, p.z);
         let bin = bins.get(key);
         if (!bin) bins.set(key, bin = { geo, mat, items: [] });
@@ -2546,28 +2580,38 @@ const World = (() => {
     // Faldón: una llanura enorme justo por debajo del mapa para que el borde
     // no se recorte contra el vacío; la niebla la funde con el fondo.
     if (mode === "over" || mode === "pueblo"){
-      /* Antes era un plano de un verde plano distinto al del mapa y se veía
-         como una alfombra cortada a cuchillo. Ahora se hornea con la MISMA
-         hierba del suelo (base + manchas) y se repite 6x6, así el borde del
-         mapa se confunde con la llanura hasta que la niebla se la lleva. */
-      const tex = cachedTex("faldon", () => {
+      /* La región es una ISLA: más allá del borde de cada zona hay mar
+         abierto, no una llanura. Antes era un plano de hierba y el corte se
+         notaba igual; el agua, además de tapar el vacío, explica por qué el
+         mundo se acaba ahí. Va medio metro por debajo del suelo, así el
+         límite se lee como una costa y no como una alfombra pegada. */
+      const tex = cachedTex("mar", () => {
         const c = document.createElement("canvas");
         c.width = c.height = 512;
         const x = c.getContext("2d");
-        x.fillStyle = GCOL.grass;
+        const g = x.createLinearGradient(0, 0, 0, 512);
+        g.addColorStop(0, GCOL.waterDeep);
+        g.addColorStop(1, "#1f5f9e");
+        x.fillStyle = g;
         x.fillRect(0, 0, 512, 512);
-        paintPatches(x, 512, 512, GCOL.grassPatch, 46, 20, 90, 0.5, 11);
-        paintPatches(x, 512, 512, GCOL.grassPatch, 22, 60, 160, 0.28, 77);
+        // olas sueltas, del mismo aire que las del mar del mapa
+        x.strokeStyle = "rgba(226,248,255,.30)"; x.lineCap = "round";
+        for (let i=0; i<70; i++){
+          const h = hsh(i*7+3, i*13+9);
+          const ax = h % 512, ay = (h>>>9) % 512, r = 7 + (h>>>4) % 9;
+          x.lineWidth = 2 + ((h>>>17) % 12)/10;
+          x.beginPath(); x.arc(ax, ay, r, Math.PI*1.12, Math.PI*1.88); x.stroke();
+        }
         return c;
       });
       tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-      tex.repeat.set(6, 6);
-      const skirt = new THREE.Mesh(
-        own(new THREE.PlaneGeometry(MW*6, MH*6)),
+      tex.repeat.set(10, 10);
+      const oceano = new THREE.Mesh(
+        own(new THREE.PlaneGeometry(MW*8, MH*8)),
         own(new THREE.MeshLambertMaterial({ map: tex })));
-      skirt.rotation.x = -Math.PI/2;
-      skirt.position.set(MW/2, -0.08, MH/2);
-      worldGroup.add(skirt);
+      oceano.rotation.x = -Math.PI/2;
+      oceano.position.set(MW/2, -0.5, MH/2);
+      worldGroup.add(oceano);
     } else if (mode === "cueva"){
       const skirt = new THREE.Mesh(
         own(new THREE.PlaneGeometry(MW*6, MH*6)),
@@ -2687,12 +2731,12 @@ const World = (() => {
           addLabel(label, x+3, labelY, y+5.6,
             cleared ? { bg:"#fff3c9", fg:"#b8860b" } : locked ? { bg:"#e8e6f0", fg:"#7a7790" } : { bg:"#fffdf4", fg:"#33314e" });
         }
-        else if (d.shop)     addLabel("상점 🛒", x+3, labelY, y+5.6, { fg:"#2f9e5b" });
-        else if (d.alcaldia) addLabel("시청 🏛", x+3, labelY, y+5.6, { fg:"#b8860b" });
-        else if (d.casa)     addLabel("집 Casa", x+3, labelY, y+5.6, { fg:"#e05575" });
-        else if (d.cafe)     addLabel("카페 ☕", x+3, labelY, y+5.6, { fg:"#a0653a" });
-        else if (d.academia) addLabel("학원 📚", x+3, labelY, y+5.6, { fg:"#4361ee" });
-        else if (d.norebang) addLabel("노래방 🎤", x+3, labelY, y+5.6, { fg:"#d6336c" });
+        else if (d.shop)     addLabel(Data.world().labels.shop, x+3, labelY, y+5.6, { fg:"#2f9e5b" });
+        else if (d.alcaldia) addLabel(Data.world().labels.alcaldia, x+3, labelY, y+5.6, { fg:"#b8860b" });
+        else if (d.casa)     addLabel(Data.world().labels.casa, x+3, labelY, y+5.6, { fg:"#e05575" });
+        else if (d.cafe)     addLabel(Data.world().labels.cafe, x+3, labelY, y+5.6, { fg:"#a0653a" });
+        else if (d.academia) addLabel(Data.world().labels.academia, x+3, labelY, y+5.6, { fg:"#4361ee" });
+        else if (d.norebang) addLabel(Data.world().labels.norebang, x+3, labelY, y+5.6, { fg:"#d6336c" });
       } else if (d.sprite === "caveDoor"){
         const arch = Paper.caveArchMesh();
         arch.position.set(x+2, 0, y+1.2);
@@ -3995,7 +4039,7 @@ const World = (() => {
       const m = region.meta[y][x];
       if (!m) continue;
       const z = zoneAt(x, y);
-      const at = { x, y, zone: ZONE_NAMES[z.j][z.i] };
+      const at = { x, y, zone: zoneLabel(z.i, z.j).name };
       if (m.type === "gymdoor") doors.push({ what:"gimnasio " + m.key, ...at });
       else if (m.type === "cavedoor" && x % 2 === 1) doors.push({ what:"cueva", ...at });
       else if (m.type === "fishspot") doors.push({ what:"muelle de pesca", ...at });
@@ -4029,7 +4073,7 @@ const World = (() => {
       W: region.W, H: region.H, mode, doors, walk,
       blockedRoad, straddling,
       cols: ZONE_COLS, rows: ZONE_ROWS,
-      zone: { ...curZone, name: ZONE_NAMES[curZone.j][curZone.i] },
+      zone: { ...curZone, name: zoneLabel(curZone.i, curZone.j).name },
       player: toGlobal(player.x, player.y),
     };
   }
@@ -4047,6 +4091,29 @@ const World = (() => {
     if (!region || mode !== "over") return false;
     loadZone(i, j, ZONE_COLS[i] + 4, ZONE_ROWS[j] + 4);
     return true;
+  }
+
+  // qué se está dibujando fuera de los límites del mapa (depuración)
+  function debugOutside(){
+    const out = {};
+    const M = new THREE.Matrix4(), P = new THREE.Vector3();
+    const fuera = (p) => p.x < -1 || p.z < -1 || p.x > MW+1 || p.z > MH+1;
+    worldGroup.traverse(o => {
+      const etiqueta = o.isInstancedMesh ? "inst:"+o.count : (o.isMesh ? "mesh" : o.type);
+      if (o.isInstancedMesh){
+        let n = 0, ej = null;
+        for (let i=0;i<o.count;i++){
+          o.getMatrixAt(i, M); P.setFromMatrixPosition(M);
+          if (fuera(P)){ n++; if (!ej) ej = [+P.x.toFixed(1), +P.z.toFixed(1)]; }
+        }
+        if (n) out[etiqueta+"|"+(out.__i = (out.__i||0)+1)] = { n, ej };
+      } else if (o.isMesh || o.isSprite){
+        o.getWorldPosition(P);
+        if (fuera(P)) out["suelto|"+(out.__s = (out.__s||0)+1)] = { ej:[+P.x.toFixed(1), +P.z.toFixed(1)] };
+      }
+    });
+    delete out.__i; delete out.__s;
+    return { MW, MH, out };
   }
 
   // teleport (debug/trucos)
@@ -4070,5 +4137,5 @@ const World = (() => {
     return true;
   }
 
-  return { start, debug, debugEnter, playerFrameURL, sheetFrameURL, tp, regionInfo, zoneExits, debugZone, respawn, musicTheme };
+  return { start, debug, debugEnter, playerFrameURL, sheetFrameURL, tp, regionInfo, zoneExits, debugZone, debugOutside, respawn, musicTheme };
 })();

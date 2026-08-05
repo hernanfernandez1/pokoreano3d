@@ -50,6 +50,29 @@ await pg.waitForFunction('typeof World!=="undefined" && World.debug().ready',{ti
 const tras = await pg.evaluate(()=>Data.langCode()+"/"+Data.levelKey());
 check("al continuar mantiene idioma y nivel", tras==="en/basico", tras);
 
+// los rótulos del mundo tienen que seguir al idioma: jugando en inglés no
+// debe quedar hangul suelto en pueblos, carteles ni banner de zona
+const hangul = /[가-힣]/;
+const mundo = await pg.evaluate(() => {
+  const w = Data.world();
+  return { pueblo: w.towns.hangul.name, sub: w.towns.hangul.sub,
+           tienda: w.labels.shop, zona: World.regionInfo().zone.name };
+});
+check("pueblos en el idioma elegido", !hangul.test(mundo.sub), `${mundo.pueblo} · ${mundo.sub}`);
+check("rótulo de tienda traducido", !hangul.test(mundo.tienda), mundo.tienda);
+check("banner de zona sin hangul", !hangul.test(mundo.zona), mundo.zona);
+
+// los NPCs tienen que hablar en el idioma que se estudia
+const charla = await pg.evaluate(() => {
+  const t = Data.world().npc || {};
+  const conHangul = Object.entries(t).filter(([k, v]) =>
+    /[가-힣]/.test(v.name) || (v.lines || []).some(l => /[가-힣]/.test(l.ko)));
+  return { total: Object.keys(t).length, malos: conHangul.map(([k]) => k),
+           muestra: (t.abuela && t.abuela.lines[0].ko) || "—" };
+});
+check("NPCs traducidos", charla.total > 10 && !charla.malos.length,
+  `${charla.total} personajes · "${charla.muestra}"`);
+
 console.log(checks.join("\n"));
 console.log("errores de consola:", errors.length?errors.slice(0,4):"ninguno");
 await b.close(); server.close();

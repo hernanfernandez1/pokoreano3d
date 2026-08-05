@@ -70,6 +70,15 @@ if (!strOk) fails.push(`${info.straddling.length} edificios a caballo entre zona
 console.log(`  ${strOk ? "OK   " : "FALLA"}  ningún edificio parte una frontera` +
   (strOk ? "" : ` — ${info.straddling.slice(0,6).map(p => `${p.sprite}@${p.x},${p.y}`).join(" ")}`));
 
+// --- 2c: nada dibujándose fuera del mapa (se vería flotando sobre el mar) ---
+const fuera = await page.evaluate(() => {
+  const r = World.debugOutside();
+  return Object.entries(r.out).map(([k, v]) => `${k} n=${v.n || 1} en ${v.ej}`);
+});
+if (fuera.length) fails.push(`${fuera.length} lotes dibujados fuera del mapa`);
+console.log(`  ${fuera.length ? "FALLA" : "OK   "}  nada se dibuja fuera de la zona` +
+  (fuera.length ? ` — ${fuera.slice(0,3).join(" · ")}` : ""));
+
 // --- 3: grafo de zonas, entrando en cada una y mirando sus salidas ---
 console.log("\nfronteras entre zonas:");
 const sides = { "-1,0":"O", "1,0":"E", "0,-1":"N", "0,1":"S" };

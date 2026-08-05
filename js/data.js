@@ -536,6 +536,97 @@ const Data = (() => {
     },
   };
 
+  /* ---------- Nombres del mundo ----------
+     El mapa es el mismo en los dos idiomas, pero sus rótulos no: jugando en
+     inglés no tiene sentido que los pueblos se llamen 한글 마을 ni que la
+     tienda ponga 상점. Cada idioma trae aquí sus letreros; el mundo los pide
+     por la clave del gimnasio, que sí es común. */
+  const WORLD = {
+    ko: {
+      towns: {
+        hangul:{ name:"Pueblo Hangul", sub:"한글 마을" },
+        numeros:{ name:"Pueblo Sutja", sub:"숫자 마을" },
+        particulas:{ name:"Pueblo Josa", sub:"조사 마을" },
+        verbos:{ name:"Pueblo Dongsa", sub:"동사 마을" },
+        topik2:{ name:"Pueblo Topik", sub:"토픽 마을" },
+        topik1:{ name:"Puerto Topik", sub:"토픽 항구" },
+        honor:{ name:"Pueblo Jondae", sub:"존경 마을" },
+      },
+      zones: { lago:"Valle del Lago", lagoSub:"호수 골짜기",
+               bosque:"Bosque del Sur", bosqueSub:"남쪽 숲" },
+      labels: { shop:"상점 🛒", alcaldia:"시청 🏛", casa:"집 Casa",
+                cafe:"카페 ☕", academia:"학원 📚", norebang:"노래방 🎤" },
+    },
+    en: {
+      towns: {
+        hangul:{ name:"Pueblo Sonidos", sub:"Sound Town" },
+        numeros:{ name:"Pueblo Números", sub:"Number Town" },
+        particulas:{ name:"Pueblo Preposición", sub:"Preposition Town" },
+        verbos:{ name:"Pueblo Verbo", sub:"Verb Town" },
+        topik2:{ name:"Pueblo Tiempos", sub:"Tense Town" },
+        topik1:{ name:"Puerto Palabra", sub:"Word Harbour" },
+        honor:{ name:"Pueblo Cortesía", sub:"Manners Town" },
+      },
+      zones: { lago:"Valle del Lago", lagoSub:"Lake Valley",
+               bosque:"Bosque del Sur", bosqueSub:"South Woods" },
+      labels: { shop:"Shop 🛒", alcaldia:"Town Hall 🏛", casa:"Home 🏠",
+                cafe:"Café ☕", academia:"Academy 📚", norebang:"Karaoke 🎤" },
+      /* Diálogos en inglés. Los del coreano viven en world.js (son los
+         originales); aquí solo hace falta lo que los sustituye. Cada NPC
+         mantiene su nombre traducido y sus frases en el idioma que enseña. */
+      npc: {
+        abuela: { name:"Grandma", lines:[
+          { ko:"Good morning, dear!", rom:"gud morning dir", es:"¡Buenos días, cielo!" },
+          { ko:"The weather is lovely today.", rom:"de weder is lovli tudei", es:"Hoy hace un tiempo precioso." },
+          { ko:"Be careful in the tall grass.", rom:"bi kerful in de tol gras", es:"Ten cuidado en la hierba alta." } ] },
+        nino: { name:"Kid", lines:[
+          { ko:"Hi! Do you want to play?", rom:"jai du yu wont tu plei", es:"¡Hola! ¿Quieres jugar?" },
+          { ko:"I'm learning new words.", rom:"aim lerning niu werds", es:"Estoy aprendiendo palabras nuevas." } ] },
+        vendedor: { name:"Merchant", lines:[
+          { ko:"Looking for something?", rom:"luking for somzing", es:"¿Buscas algo?" },
+          { ko:"The shop is up north.", rom:"de shop is ap norz", es:"La tienda está al norte." } ] },
+        pescador: { name:"Fisherman", lines:[
+          { ko:"The sea is calm today.", rom:"de si is kalm tudei", es:"El mar está tranquilo hoy." },
+          { ko:"Try fishing at the end of the pier.", rom:"trai fishing at de end ov de pir", es:"Prueba a pescar al final del muelle." } ] },
+        monje: { name:"Monk", lines:[
+          { ko:"Patience is a virtue.", rom:"peishens is a verchu", es:"La paciencia es una virtud." },
+          { ko:"The cave hides an old master.", rom:"de keiv jaids an ould master", es:"La cueva esconde a un viejo maestro." } ] },
+        guardia: { name:"Guard", lines:[
+          { ko:"Halt! This cave is dangerous.", rom:"jolt dis keiv is deinllerus", es:"¡Alto! Esta cueva es peligrosa." },
+          { ko:"You need seven badges to enter.", rom:"yu nid seven bachis tu enter", es:"Necesitas siete medallas para entrar." } ] },
+        granjero: { name:"Farmer", lines:[
+          { ko:"My sheep escaped again!", rom:"mai ship eskeipt aguein", es:"¡Mis ovejas se han vuelto a escapar!" },
+          { ko:"Do you want an apple?", rom:"du yu wont an apol", es:"¿Quieres una manzana?" } ] },
+        fan: { name:"Pop fan", lines:[
+          { ko:"Do you like music?", rom:"du yu laik miusik", es:"¿Te gusta la música?" },
+          { ko:"Let's sing together!", rom:"lets sing tugueder", es:"¡Cantemos juntos!" } ] },
+        vecina: { name:"Neighbour", lines:[
+          { ko:"Welcome to our town!", rom:"welkom tu aur taun", es:"¡Bienvenida a nuestro pueblo!" },
+          { ko:"The mayor is at the town hall.", rom:"de meior is at de taun jol", es:"La alcaldesa está en el ayuntamiento." } ] },
+        ninoPueblo: { name:"Boy", lines:[
+          { ko:"They teach English at the academy.", rom:"dei tich inglish at de akademi", es:"En la academia enseñan inglés." },
+          { ko:"It's really fun!", rom:"its rili fan", es:"¡Es muy divertido!" } ] },
+        abueloPueblo: { name:"Grandpa", lines:[
+          { ko:"Take your time, no rush.", rom:"teik yur taim nou rash", es:"Tómate tu tiempo, sin prisa." },
+          { ko:"It's a long road. Safe travels.", rom:"its a long roud seif travels", es:"El camino es largo. Buen viaje." } ] },
+        rival: { name:"Rina (rival)", lines:[
+          { ko:"My pronunciation is the best!", rom:"mai pronansieishon is de best", es:"¡Mi pronunciación es la mejor!" },
+          { ko:"Do you want to challenge me?", rom:"du yu wont tu chalinch mi", es:"¿Quieres retarme?" } ] },
+        tendero: { name:"Shopkeeper", lines:[
+          { ko:"Welcome! Take a look around.", rom:"welkom teik a luk araund", es:"¡Bienvenida! Echa un vistazo." } ] },
+        barista: { name:"Barista", lines:[
+          { ko:"Welcome to the café!", rom:"welkom tu de kafei", es:"¡Bienvenida al café!" },
+          { ko:"What would you like to order?", rom:"wot wud yu laik tu order", es:"¿Qué desea pedir?" } ] },
+        maestra: { name:"Teacher", lines:[
+          { ko:"Shall we review today's words?", rom:"shal wi riviu tudeis werds", es:"¿Repasamos las palabras de hoy?" } ] },
+        dj: { name:"DJ", lines:[
+          { ko:"Ready to sing?", rom:"redi tu sing", es:"¿Lista para cantar?" } ] },
+        gato_casa: { name:"Cat", lines:[
+          { ko:"Meow~ home sweet home.", rom:"miau joum suit joum", es:"Miau~ hogar, dulce hogar." } ] },
+      },
+    },
+  };
+
   let curLang = "ko", curLevel = "medio";
   const L = () => LANGS[curLang];
   function setLang(code){ if (LANGS[code]) curLang = code; }
@@ -556,6 +647,7 @@ const Data = (() => {
   return {
     // idioma y nivel
     setLang, setLevel, byLevel,
+    world: () => WORLD[curLang] || WORLD.ko,
     lang: () => L(),
     langCode: () => curLang,
     langs: () => Object.values(LANGS),
