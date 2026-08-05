@@ -48,35 +48,46 @@
 
     <!-- Overworld map -->
     <section id="screen-map" class="screen">
-      <header class="topbar">
-        <div class="player-zone">
-          <div class="player-chip"><span id="player-avatar" class="avatar-mini"></span><span id="player-name">Karol</span></div>
+      <!-- HUD del mapa: no es una barra, son dos islas flotando sobre el 3D.
+           La franja opaca partía la pantalla con una línea dura y robaba alto
+           al mundo. -->
+      <header class="map-hud">
+        <div class="hud-left">
+          <div class="player-chip">
+            <span id="player-avatar" class="avatar-mini"></span>
+            <span id="player-name">Karol</span>
+            <span class="chip-lv stat">⭐ Nv.<b id="stat-level">1</b></span>
+          </div>
           <div class="xpbar" title="Experiencia"><div id="xp-fill"></div><span id="xp-text">XP 0/15</span></div>
+          <div class="stats">
+            <span class="stat">🏅 <b id="stat-badges">0</b>/8</span>
+            <span class="stat">📖 <b id="stat-vocab">0</b></span>
+            <span class="stat">🐾 <b id="stat-guardians">0</b>/12</span>
+            <span class="stat">💰 <b id="stat-coins">0</b></span>
+          </div>
+          <!-- el banner de misión vive DENTRO de la columna izquierda: como
+               isla suelta acababa pisando las estadísticas -->
+          <div id="quest-banner" class="quest-banner"></div>
         </div>
-        <div class="stats">
-          <span class="stat">⭐ Nv.<b id="stat-level">1</b></span>
-          <span class="stat">🏅 <b id="stat-badges">0</b>/8</span>
-          <span class="stat">📖 <b id="stat-vocab">0</b></span>
-          <span class="stat">🐾 <b id="stat-guardians">0</b>/12</span>
-          <span class="stat">💰 <b id="stat-coins">0</b></span>
-        </div>
-        <div class="topbar-actions">
-          <button class="btn small" data-action="dex">Vocabudex</button>
-          <button class="btn small" data-action="guardians">Guardianes</button>
-          <button class="btn small" data-action="bag">Mochila</button>
-          <button class="btn small" data-action="mute" id="mute-btn">🔊</button>
-          <button class="btn small" data-action="cheats">🧪</button>
-          <button class="btn small" data-action="save">Guardar</button>
+        <div class="hud-right">
+          <div class="topbar-actions">
+            <button class="btn small" data-action="dex" title="Vocabudex">📖</button>
+            <button class="btn small" data-action="guardians" title="Guardianes">🐾</button>
+            <button class="btn small" data-action="bag" title="Mochila">🎒</button>
+            <button class="btn small" data-action="save" title="Guardar">💾</button>
+            <button class="btn small" data-action="mute" id="mute-btn" title="Sonido">🔊</button>
+            <button class="btn small" data-action="cheats" title="Trucos">🧪</button>
+          </div>
+          <!-- y el minimapa debajo de los botones, por lo mismo -->
+          <div id="minimap" class="minimap">
+            <div id="minimap-zone" class="minimap-zone">…</div>
+            <canvas id="minimap-canvas"></canvas>
+          </div>
         </div>
       </header>
       <div class="map-canvas" id="map-wrap">
         <canvas id="world-canvas"></canvas>
-        <div id="quest-banner" class="quest-banner"></div>
         <div id="loc-banner" class="loc-banner"></div>
-        <div id="minimap" class="minimap">
-          <div id="minimap-zone" class="minimap-zone">…</div>
-          <canvas id="minimap-canvas"></canvas>
-        </div>
         <div id="dialog" class="dialog" hidden>
           <div class="dlg-name"></div>
           <div class="dlg-ko"></div>
