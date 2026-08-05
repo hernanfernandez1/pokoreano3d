@@ -817,14 +817,24 @@ const UI = (() => {
       if (c.ability.id === "phoenix"){ gym.phoenix = true; return; }
       gym.abilities.push({ creature: c, uses, affinity });
     });
-    // Build a shuffled list of unique questions from pool
+    /* Palabras SIN repetir: el bucle anterior sorteaba con reemplazo y podía
+       preguntar dos veces lo mismo en un examen. Se baraja el conjunto y se
+       toman las primeras; solo si el examen es más largo que el vocabulario
+       disponible se vuelve a dar la vuelta. */
     const pool = Data.byLevel(g.pool);
+    const barajado = pool.slice().sort(() => Math.random() - 0.5);
     const words = [];
     while (words.length < g.total) {
-      const w = pool[Math.random()*pool.length|0];
-      words.push(w);
+      words.push(...barajado.slice(0, g.total - words.length));
+      if (!barajado.length) break;
     }
-    gym.questions = words.map(w => Engine.buildQuestion(w, Data.allWords, g.questionMode));
+    /* Los modos se turnan en vez de sortearse uno a uno: al azar salían tres
+       preguntas de leer seguidas y el examen se hacía monótono. */
+    const modos = g.questionMode === "mixed"
+      ? (Data.lang().modes || ["han-to-es","es-to-han"])
+      : [g.questionMode];
+    const señuelos = Data.byLevel(Data.allWords);
+    gym.questions = words.map((w, i) => Engine.buildQuestion(w, señuelos, modos[i % modos.length]));
     $("#gym-title").textContent = `${g.name} — ${g.leader}`;
     $("#gym-total").textContent = g.total;
     $("#leader-sprite").innerHTML = Sprites.get(g.leaderSprite);

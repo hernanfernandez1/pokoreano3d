@@ -47,6 +47,29 @@ for (const lang of ["ko","en"]){
     if (new Set(q.opciones).size !== q.opciones.length) fails.push(`${lang}/${q.gym}: opciones repetidas`);
   });
 }
+// --- un examen completo: ni palabras repetidas ni rachas del mismo modo ---
+for (const lang of ["ko","en"]){
+  const r = await pg.evaluate((lang) => {
+    Data.setLang(lang); Data.setLevel("medio");
+    const g = Data.gyms.find(x => x.key === "topik1");
+    const pool = Data.byLevel(g.pool);
+    const barajado = pool.slice().sort(() => Math.random() - 0.5);
+    const words = [];
+    while (words.length < g.total){ words.push(...barajado.slice(0, g.total - words.length)); if (!barajado.length) break; }
+    const modos = g.questionMode === "mixed" ? (Data.lang().modes || []) : [g.questionMode];
+    const qs = words.map((w, i) => Engine.buildQuestion(w, Data.byLevel(Data.allWords), modos[i % modos.length]));
+    return { nombre: Data.lang().name, total: g.total,
+      palabras: qs.map(q => q.word.han), modos: qs.map(q => q.mode) };
+  }, lang);
+
+  const repes = r.palabras.length - new Set(r.palabras).size;
+  if (repes) fails.push(`${r.nombre}: ${repes} palabras repetidas en un examen`);
+  let racha = 1, peor = 1;
+  for (let i=1;i<r.modos.length;i++){ racha = r.modos[i]===r.modos[i-1] ? racha+1 : 1; peor = Math.max(peor, racha); }
+  if (peor > 2) fails.push(`${r.nombre}: ${peor} preguntas seguidas del mismo tipo`);
+  console.log(`\n  ${r.nombre}: examen de ${r.total} · ${repes} repetidas · racha máxima del mismo tipo: ${peor}`);
+}
+
 console.log("\n" + (fails.length ? "FALLOS:\n  " + [...new Set(fails)].join("\n  ") : "OK   preguntas coherentes en los dos idiomas"));
 await b.close(); server.close();
 process.exit(fails.length ? 1 : 0);

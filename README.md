@@ -42,8 +42,8 @@ capturar guardianes, que depende de la rareza de cada uno.
 
 |          | Principiante | Medio | Avanzado |
 |----------|-------------:|------:|---------:|
-| Coreano  | 51 | 85 | 96 |
-| Inglés   | 102 | 132 | 156 |
+| Coreano  | 76 | 120 | 139 |
+| Inglés   | 127 | 167 | 199 |
 
 Dos decisiones sostienen el bilingüismo sin duplicar el juego:
 
@@ -91,6 +91,7 @@ node tools/perf_world.mjs             # FPS y errores de consola
 node tools/smoke_world.mjs            # puertas, interiores, batalla y captura
 node tools/check_joystick.mjs         # joystick táctil, emulando un móvil
 node tools/check_lang.mjs             # idioma, nivel y rótulos del mundo
+node tools/check_questions.mjs        # vuelca preguntas reales de cada gimnasio
 node tools/sheet_grid.mjs <png> <celda>   # ver una hoja de sprites con rejilla
 node tools/sheet_palette.mjs <png>       # volcar su paleta, para recolorear
 node tools/sheet2js.mjs <png> <CONST> <js>  # hornear la hoja a data URI
