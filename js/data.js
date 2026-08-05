@@ -246,7 +246,7 @@ const Data = (() => {
       desc:"Todo el vocabulario, incluido el más difícil." },
   ];
   // marca de nivel por familia; una palabra puede traer el suyo propio
-  const at = (arr, n) => arr.map(w => (w.lvl ? w : { ...w, lvl: n }));
+  const at = (arr, n, fam) => arr.map(w => ({ ...w, lvl: w.lvl || n, fam: w.fam || fam }));
 
   /* Sube de nivel las entradas cuya clave esté en la lista. Sirve para afinar
      un conjunto grande sin escribir `lvl` palabra por palabra. */
@@ -262,7 +262,7 @@ const Data = (() => {
   const koAlto = ["공부하다","안녕하세요","감사합니다","사랑해"];
 
   // Frases hechas: solo tienen sentido cuando ya se domina el vocabulario
-  const koFrases = [
+  const koFrases = at([
     { han:"이름이 뭐예요?", rom:"ireumi mwoyeyo?", es:"¿cómo te llamas?", lvl:2 },
     { han:"어디에 가요?",   rom:"eodie gayo?",     es:"¿adónde vas?", lvl:2 },
     { han:"얼마예요?",      rom:"eolmayeyo?",      es:"¿cuánto cuesta?", lvl:2 },
@@ -271,7 +271,7 @@ const Data = (() => {
     { han:"다시 말해 주세요", rom:"dasi malhae juseyo", es:"repítelo, por favor", lvl:3 },
     { han:"천천히 말해 주세요", rom:"cheoncheonhi malhae juseyo", es:"habla más despacio", lvl:3 },
     { han:"무슨 뜻이에요?", rom:"museun tteusieyo?", es:"¿qué significa?", lvl:3 },
-  ];
+  ], 2, "frase");
 
   // ==========================================================
   //  RUTA DE INGLÉS
@@ -298,7 +298,7 @@ const Data = (() => {
     { han:"kn", rom:"/n/",  es:"la k es muda: 'knife'" },
     { han:"wr", rom:"/r/",  es:"la w es muda: 'write'" },
     { han:"tion",rom:"/ʃən/",es:"como en 'nation'" },
-  ], 1);
+  ], 1, "sonido");
 
   const enNumbers = at([
     { han:"one",    rom:"wan",     es:"1" },
@@ -321,7 +321,7 @@ const Data = (() => {
     { han:"first",  rom:"ferst",   es:"primero", lvl:2 },
     { han:"second", rom:"sekond",  es:"segundo", lvl:2 },
     { han:"third",  rom:"zerd",    es:"tercero", lvl:2 },
-  ], 1);
+  ], 1, "numero");
 
   const enPreps = at([
     { han:"in",      rom:"in",      es:"en (dentro)" },
@@ -340,7 +340,7 @@ const Data = (() => {
     { han:"through", rom:"zru",     es:"a través de", lvl:2 },
     { han:"across",  rom:"akros",   es:"al otro lado de", lvl:3 },
     { han:"among",   rom:"amang",   es:"entre (varios)", lvl:3 },
-  ], 1);
+  ], 1, "particula");
 
   const enVerbs = at([
     { han:"to be",    rom:"tu bi",    es:"ser / estar", verb:true },
@@ -363,7 +363,7 @@ const Data = (() => {
     { han:"to choose",rom:"tu chus",  es:"elegir", verb:true, lvl:2 },
     { han:"to become",rom:"tu bikam", es:"llegar a ser", verb:true, lvl:3 },
     { han:"to afford",rom:"tu aford", es:"permitirse", verb:true, lvl:3 },
-  ], 1);
+  ], 1, "verbo");
 
   const enTenses = at([
     { han:"I work",         rom:"ai werk",        es:"presente simple", lvl:1 },
@@ -376,7 +376,7 @@ const Data = (() => {
     { han:"I had worked",   rom:"ai jad werkt",   es:"pasado perfecto", lvl:3 },
     { han:"I have been working", rom:"ai jav bin werking", es:"perfecto continuo", lvl:3 },
     { han:"I am going to work",  rom:"ai am going tu werk", es:"futuro con 'going to'", lvl:2 },
-  ], 2);
+  ], 2, "tiempo");
 
   const enPhrasal = at([
     { han:"give up",   rom:"giv ap",    es:"rendirse", lvl:2 },
@@ -391,7 +391,7 @@ const Data = (() => {
     { han:"run out of",rom:"ran aut ov",es:"quedarse sin", lvl:3 },
     { han:"put up with",rom:"put ap wiz",es:"soportar", lvl:3 },
     { han:"look forward to", rom:"luk forward tu", es:"tener ganas de", lvl:3 },
-  ], 2);
+  ], 2, "phrasal");
 
   const enPolite = at([
     { han:"please",           rom:"plis",            es:"por favor", lvl:1 },
@@ -404,7 +404,7 @@ const Data = (() => {
     { han:"would you mind…?", rom:"wud yu maind",    es:"¿le importaría…?", lvl:3 },
     { han:"I beg your pardon",rom:"ai beg yur pardon",es:"¿cómo dice?", lvl:3 },
     { han:"sir / madam",      rom:"ser / madam",     es:"señor / señora", lvl:2 },
-  ], 1);
+  ], 1, "cortesia");
 
   const enVocab = at([
     { han:"hello",   rom:"jelou",  es:"hola" },
@@ -441,12 +441,12 @@ const Data = (() => {
     { han:"environment",rom:"invaironment",es:"medio ambiente", lvl:3 },
     { han:"opportunity",rom:"oportiuniti",es:"oportunidad", lvl:3 },
     { han:"challenge",rom:"chalinch",es:"reto", lvl:3 },
-  ], 1);
+  ], 1, "palabra");
 
   /* Frases de inglés. En principiante son fórmulas de una línea; en medio
      aparecen preguntas completas y en avanzado estructuras con condicional,
      perfecto y voz pasiva. Es donde mejor se nota el salto de nivel. */
-  const enFrases = [
+  const enFrases = at([
     { han:"What's your name?",  rom:"wots yur neim",   es:"¿cómo te llamas?", lvl:1 },
     { han:"How are you?",       rom:"jau ar yu",       es:"¿cómo estás?", lvl:1 },
     { han:"How much is it?",    rom:"jau mach is it",  es:"¿cuánto cuesta?", lvl:1 },
@@ -470,14 +470,14 @@ const Data = (() => {
     { han:"No sooner had I arrived than it started raining",
       rom:"nou suner jad ai araivd dan it started reining",
       es:"nada más llegar, empezó a llover (inversión)", lvl:3 },
-  ];
+  ], 2, "frase");
 
   const enAll = [...enSounds, ...enNumbers, ...enPreps, ...enVerbs,
                  ...enTenses, ...enPhrasal, ...enPolite, ...enVocab, ...enFrases];
 
   const enGyms = [
     { key:"hangul", name:"Gimnasio Fonética", leader:"Maestra Ann", leaderSprite:"hangulSpirit",
-      pool: enSounds, questionMode:"han-to-rom", total:10, passRatio:0.7, icon:"Aa",
+      pool: enSounds, questionMode:"han-to-rom", total:10, passRatio:0.7, icon:"Aa",  // aquí sí: "sh" → /ʃ/
       x:120, y:120, description:"Ann te reta a leer sonidos del inglés." },
     { key:"numeros", name:"Gimnasio Números", leader:"Contador Dice", leaderSprite:"numberSlime",
       pool: enNumbers, questionMode:"mixed", total:10, passRatio:0.7, icon:"12",
@@ -515,14 +515,16 @@ const Data = (() => {
   //  Idiomas y superficie pública
   // ==========================================================
   // se aplica la graduación: lo básico en 1, verbos y trato en 2-3
-  const koHangul = at(hangul, 1);
-  const koNums   = bump(at(numbers, 1), 2, koMedio);
-  const koVocab  = bump(bump(at(vocab, 1), 2, koMedio), 3, koAlto).concat(koFrases);
-  const koParts  = bump(at(particles, 2), 3, ["와/과", "만"]);
+  const koHangul = at(hangul, 1, "letra");
+  const koNums   = bump(at(numbers, 1, "numero"), 2, koMedio);
+  const koVocab  = bump(bump(at(vocab, 1, "palabra"), 2, koMedio), 3, koAlto).concat(koFrases);
+  const koParts  = bump(at(particles, 2, "particula"), 3, ["와/과", "만"]);
   const koAll = [...koHangul, ...koNums, ...koVocab, ...koParts];
   const LANGS = {
     ko: {
       code:"ko", name:"Coreano", nativo:"한국어", flag:"🇰🇷", tts:"ko-KR",
+      // en coreano leer la romanización es parte de aprender a leer
+      modes: ["han-to-es","es-to-han","han-to-rom"],
       hangul: koHangul, numbers: koNums, vocab: koVocab,
       particles: koParts, gyms, routes, allWords: koAll,
       // etiqueta de la escritura, para textos de la interfaz
@@ -530,6 +532,9 @@ const Data = (() => {
     },
     en: {
       code:"en", name:"Inglés", nativo:"English", flag:"🇬🇧", tts:"en-US",
+      /* Nada de preguntar "cómo suena": la palabra ya está en alfabeto
+         latino. Se pregunta el significado en los dos sentidos. */
+      modes: ["han-to-es","es-to-han"],
       hangul: enSounds, numbers: enNumbers, vocab: enVocab.concat(enFrases),
       particles: enPreps, gyms: enGyms, routes: enRoutes, allWords: enAll,
       script:"latin",

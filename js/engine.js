@@ -1,5 +1,5 @@
 /* ==========================================================
-   POKOREANO — Battle & Gym engine
+   GUARDIANES DEL IDIOMA — Motor de batalla y gimnasios
    ========================================================== */
 const Engine = (() => {
 
@@ -10,30 +10,43 @@ const Engine = (() => {
   // Build a question from a word using a specific mode
   // modes: han-to-es, es-to-han, han-to-rom, rom-to-han
   function buildQuestion(word, pool, mode) {
+    /* Los modos disponibles dependen del idioma. Preguntar la romanización
+       tiene sentido en coreano (물 → mul), pero en inglés la palabra ya se lee
+       tal cual: salía "hello" y había que elegir entre "jelou" y "zank yu",
+       que no enseña nada. El idioma decide qué modos entran en la rotación. */
     if (mode === "mixed") {
-      const modes = ["han-to-es","es-to-han","han-to-rom"];
-      mode = pick(modes);
+      const modos = (typeof Data !== "undefined" && Data.lang().modes)
+        || ["han-to-es","es-to-han","han-to-rom"];
+      mode = pick(modos);
     }
+    /* Los señuelos tienen que parecerse a la respuesta. Salían de TODO el
+       vocabulario, así que preguntando "one" competían un sonido, una frase y
+       un número: se acertaba por descarte, sin saber el idioma. Se buscan
+       primero de la misma familia (números con números, frases con frases) y
+       solo se abre la mano si no hay suficientes. */
+    const familia = pool.filter(w => w.fam === word.fam);
+    const señuelos = familia.length >= 4 ? familia : pool;
+
     let prompt, correct, options;
     if (mode === "han-to-es") {
       prompt = { han: word.han, hint: word.rom };
       correct = word.es;
-      const distract = sample(pool.filter(w => w.es !== word.es), 3).map(w => w.es);
+      const distract = sample(señuelos.filter(w => w.es !== word.es), 3).map(w => w.es);
       options = shuffle([correct, ...distract]);
     } else if (mode === "es-to-han") {
       prompt = { text: `¿Cómo se escribe "${word.es}"?` };
       correct = word.han;
-      const distract = sample(pool.filter(w => w.han !== word.han), 3).map(w => w.han);
+      const distract = sample(señuelos.filter(w => w.han !== word.han), 3).map(w => w.han);
       options = shuffle([correct, ...distract]);
     } else if (mode === "han-to-rom") {
       prompt = { han: word.han };
       correct = word.rom;
-      const distract = sample(pool.filter(w => w.rom !== word.rom), 3).map(w => w.rom);
+      const distract = sample(señuelos.filter(w => w.rom !== word.rom), 3).map(w => w.rom);
       options = shuffle([correct, ...distract]);
     } else {
       prompt = { text: `Romanización: ${word.rom}` };
       correct = word.han;
-      const distract = sample(pool.filter(w => w.han !== word.han), 3).map(w => w.han);
+      const distract = sample(señuelos.filter(w => w.han !== word.han), 3).map(w => w.han);
       options = shuffle([correct, ...distract]);
     }
     return { word, mode, prompt, correct, options };
@@ -43,7 +56,7 @@ const Engine = (() => {
   /* El nivel elegido decide la dificultad del idioma: en principiante no
      deben aparecer palabras avanzadas ni en la hierba ni en los exámenes. */
   function pickEncounter(pool) {
-    return pick(typeof Data !== undefined && Data.byLevel ? Data.byLevel(pool) : pool);
+    return pick(typeof Data !== "undefined" && Data.byLevel ? Data.byLevel(pool) : pool);
   }
 
   // Rarity roll for crates (approximate CS/LoL feel)
@@ -86,21 +99,26 @@ const Engine = (() => {
     return reward;
   }
 
-  // Korean TTS via Web Speech API
+  /* Voz por Web Speech API. Estaba clavada en coreano: jugando en inglés
+     leía "hello" con voz coreana. Ahora coge el idioma que se estudia. */
   let voices = [];
   function initTTS() {
     if (!("speechSynthesis" in window)) return;
     voices = speechSynthesis.getVoices();
     speechSynthesis.onvoiceschanged = () => voices = speechSynthesis.getVoices();
   }
+  function ttsLang(){
+    return (typeof Data !== "undefined" && Data.lang().tts) || "ko-KR";
+  }
   function speak(text){
     if (!("speechSynthesis" in window)) return;
     try {
       speechSynthesis.cancel();
+      const lang = ttsLang();
       const u = new SpeechSynthesisUtterance(text);
-      const koVoice = voices.find(v => v.lang && v.lang.startsWith("ko"));
-      if (koVoice) u.voice = koVoice;
-      u.lang = "ko-KR";
+      const v = voices.find(x => x.lang && x.lang.startsWith(lang.slice(0,2)));
+      if (v) u.voice = v;
+      u.lang = lang;
       u.rate = 0.9;
       speechSynthesis.speak(u);
     } catch(e){}

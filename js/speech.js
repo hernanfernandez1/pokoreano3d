@@ -25,7 +25,8 @@ const Speech = (() => {
         return;
       }
       const rec = new SR();
-      rec.lang = "ko-KR";
+      // el micrófono escucha en el idioma que se estudia, no siempre coreano
+      rec.lang = (typeof Data !== "undefined" && Data.lang().tts) || "ko-KR";
       rec.interimResults = false;
       rec.maxAlternatives = 5;
       rec.continuous = false;
