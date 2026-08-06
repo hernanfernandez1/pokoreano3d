@@ -740,6 +740,26 @@ const World = (() => {
     }
   }
   // Casa: base sólida = filas 4-7, puerta abajo al centro
+  /* Umbral de 3 casillas de ancho, más el felpudo de delante.
+     Con una sola casilla había que clavar el tile exacto, y con el joystick
+     del móvil eso es una lotería: se pasaba de largo una y otra vez. Tres
+     casillas se aciertan sin mirar, y no se entra sin querer porque hay que
+     caminar HACIA el edificio; pasar por delante no activa nada. */
+  const DOOR_HALF = 1;
+  function openDoor(x, y, info){
+    for (let d = -DOOR_HALF; d <= DOOR_HALF; d++){
+      const dx = x + d;
+      if (solid[y]?.[dx] === undefined) continue;
+      solid[y][dx] = false;
+      meta[y][dx] = { ...info };
+      if (y+1 < MH){                     // felpudo: marca la entrada
+        solid[y+1][dx] = false;
+        ground[y+1][dx] = "path";
+        meta[y+1][dx] = null;
+      }
+    }
+  }
+
   function putHouse(g){
     const x=g.x, y=g.y;
     clearTreesRect(x-4, y-5, x+7, y+9);
@@ -748,14 +768,7 @@ const World = (() => {
       if (solid[y+dy] === undefined || solid[y+dy][x+dx] === undefined) continue;
       solid[y+dy][x+dx]=true; meta[y+dy][x+dx]=null;
     }
-    const doorX=x+2, doorY=y+7;
-    solid[doorY][doorX]=false;
-    meta[doorY][doorX]={type:"gymdoor", key:g.key};
-    if (doorY+1 < MH){
-      solid[doorY+1][doorX]=false;
-      ground[doorY+1][doorX]="path";
-      meta[doorY+1][doorX]=null;
-    }
+    openDoor(x+2, y+7, { type:"gymdoor", key:g.key });
   }
 
   function putCaveEntrance(x,y){
@@ -767,13 +780,13 @@ const World = (() => {
       if (solid[y+dy] === undefined || solid[y+dy][x+dx] === undefined) continue;
       solid[y+dy][x+dx]=true; meta[y+dy][x+dx]=null;
     }
-    [x+1,x+2].forEach(dx0 => {
+    // boca de 3 casillas, igual que las puertas de los edificios
+    [x, x+1, x+2].forEach(dx0 => {
+      if (solid[y+1]?.[dx0] === undefined) return;
       solid[y+1][dx0]=false;
       meta[y+1][dx0]={type:"cavedoor"};
+      if (y+2 < MH){ solid[y+2][dx0]=false; ground[y+2][dx0]="dirtA"; meta[y+2][dx0]=null; }
     });
-    if (y+2 < MH){
-      [x+1,x+2].forEach(dx0 => { solid[y+2][dx0]=false; ground[y+2][dx0]="dirtA"; meta[y+2][dx0]=null; });
-    }
   }
 
   // ---------- Tienda ----------
@@ -796,14 +809,7 @@ const World = (() => {
       solid[y+dy][x+dx]=true; meta[y+dy][x+dx]=null;
     }
     if (!doorType) return; // casa de vecinos: se ve, pero no se entra
-    const doorX=x+2, doorY=y+7;
-    solid[doorY][doorX]=false;
-    meta[doorY][doorX]={type:doorType};
-    if (doorY+1 < MH){
-      solid[doorY+1][doorX]=false;
-      ground[doorY+1][doorX]="path";
-      meta[doorY+1][doorX]=null;
-    }
+    openDoor(x+2, y+7, { type:doorType });
   }
   function putShop(x,y){ putBuilding(x, y, "houseG", "shopdoor", "shop"); }
   function putHome(x,y){ putBuilding(x, y, "house", "casadoor", "casa"); }
@@ -4034,18 +4040,46 @@ const World = (() => {
      que ninguna frontera entre zonas se quedó sellada. */
   function regionInfo(){
     if (!region) return { doors: [], zones: [] };
+    // los umbrales miden 3 casillas: se lista una vez por puerta, no por tile
+    const vistas = new Set();
     const doors = [];
     for (let y=0;y<region.H;y++) for (let x=0;x<region.W;x++){
       const m = region.meta[y][x];
       if (!m) continue;
       const z = zoneAt(x, y);
-      const at = { x, y, zone: zoneLabel(z.i, z.j).name };
-      if (m.type === "gymdoor") doors.push({ what:"gimnasio " + m.key, ...at });
-      else if (m.type === "cavedoor" && x % 2 === 1) doors.push({ what:"cueva", ...at });
-      else if (m.type === "fishspot") doors.push({ what:"muelle de pesca", ...at });
+      let que = null;
+      if (m.type === "gymdoor") que = "gimnasio " + m.key;
+      else if (m.type === "cavedoor") que = "cueva";
+      else if (m.type === "fishspot") que = "muelle de pesca";
       else if (["shopdoor","casadoor","alcaldiadoor","cafedoor","academiadoor","norebangdoor"]
-        .includes(m.type)) doors.push({ what: m.type.replace("door",""), ...at });
+        .includes(m.type)) que = m.type.replace("door","");
+      if (!que || vistas.has(que)) continue;
+      vistas.add(que);
+      /* Se informa del CENTRO del vano, no de su primera casilla: ahora los
+         umbrales miden 3 y quien use estas coordenadas espera el medio. */
+      let x2 = x;
+      while (region.meta[y][x2+1] && region.meta[y][x2+1].type === m.type) x2++;
+      const cx = (x + x2) >> 1;
+      doors.push({ what: que, x: cx, y, zone: zoneLabel(z.i, z.j).name });
     }
+    /* Ancho de cada umbral: cuántas casillas seguidas dan a lo mismo. Es la
+       medida de "lo fácil que es acertar la puerta" con el joystick. */
+    const doorWidths = {};
+    for (let y=0;y<region.H;y++){
+      let x = 0, run = 0, que = null;
+      const cerrar = () => { if (que && run > (doorWidths[que]||0)) doorWidths[que] = run; run = 0; que = null; };
+      for (x=0; x<region.W; x++){
+        const m = region.meta[y][x];
+        const t = m && m.type;
+        const k = t === "gymdoor" ? "gimnasio " + m.key
+          : ["shopdoor","casadoor","alcaldiadoor","cafedoor","academiadoor","norebangdoor","cavedoor"].includes(t)
+            ? t.replace("door","") : null;
+        if (k && k === que){ run++; }
+        else { cerrar(); if (k){ que = k; run = 1; } }
+      }
+      cerrar();
+    }
+
     // rejilla transitable de la región, para el BFS del validador
     const walk = [];
     for (let y=0;y<region.H;y++){
@@ -4071,7 +4105,7 @@ const World = (() => {
     }
     return {
       W: region.W, H: region.H, mode, doors, walk,
-      blockedRoad, straddling,
+      blockedRoad, straddling, doorWidths,
       cols: ZONE_COLS, rows: ZONE_ROWS,
       zone: { ...curZone, name: zoneLabel(curZone.i, curZone.j).name },
       player: toGlobal(player.x, player.y),
