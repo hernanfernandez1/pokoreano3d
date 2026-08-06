@@ -652,7 +652,8 @@ const Data = (() => {
       zones: { lago:"Valle del Lago", lagoSub:"호수 골짜기",
                bosque:"Bosque del Sur", bosqueSub:"남쪽 숲" },
       labels: { shop:"상점 🛒", alcaldia:"시청 🏛", casa:"집 Casa",
-                cafe:"카페 ☕", academia:"학원 📚", norebang:"노래방 🎤" },
+                cafe:"카페 ☕", academia:"학원 📚", norebang:"노래방 🎤",
+                cueva:"동굴 ⛰" },
     },
     en: {
       towns: {
@@ -667,7 +668,8 @@ const Data = (() => {
       zones: { lago:"Valle del Lago", lagoSub:"Lake Valley",
                bosque:"Bosque del Sur", bosqueSub:"South Woods" },
       labels: { shop:"Shop 🛒", alcaldia:"Town Hall 🏛", casa:"Home 🏠",
-                cafe:"Café ☕", academia:"Academy 📚", norebang:"Karaoke 🎤" },
+                cafe:"Café ☕", academia:"Academy 📚", norebang:"Karaoke 🎤",
+                cueva:"Cave ⛰" },
       /* Diálogos en inglés. Los del coreano viven en world.js (son los
          originales); aquí solo hace falta lo que los sustituye. Cada NPC
          mantiene su nombre traducido y sus frases en el idioma que enseña. */

@@ -780,8 +780,11 @@ const World = (() => {
       if (solid[y+dy] === undefined || solid[y+dy][x+dx] === undefined) continue;
       solid[y+dy][x+dx]=true; meta[y+dy][x+dx]=null;
     }
-    // boca de 3 casillas, igual que las puertas de los edificios
-    [x, x+1, x+2].forEach(dx0 => {
+    /* El arco se dibuja centrado en x+2, que es el BORDE entre las casillas
+       x+1 y x+2: por eso la boca original medía dos y quedaba centrada.
+       Se ensancha una casilla a cada lado —cuatro en total— para no
+       descuadrarla respecto a lo que se ve. */
+    [x, x+1, x+2, x+3].forEach(dx0 => {
       if (solid[y+1]?.[dx0] === undefined) return;
       solid[y+1][dx0]=false;
       meta[y+1][dx0]={type:"cavedoor"};
@@ -2747,7 +2750,9 @@ const World = (() => {
         const arch = Paper.caveArchMesh();
         arch.position.set(x+2, 0, y+1.2);
         worldGroup.add(arch);
-        if (d.pueblo) addLabel("마을 Pueblo", x+2, 3.4, y+1.2, { fg:"#3fa9f5" });
+        // sin cartel la cueva se leía como un pedrusco más del bosque
+        addLabel(d.pueblo ? "마을 Pueblo" : (Data.world().labels.cueva || "⛰"),
+          x+2, 3.4, y+1.2, { fg: d.pueblo ? "#3fa9f5" : "#8a7fb0" });
       } else if (d.sprite === "fountain"){
         const f = Paper.fountainMesh();
         f.position.set(x+1.5, 0, y+1.5);
